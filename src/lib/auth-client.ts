@@ -7,5 +7,7 @@ export const authClient = createAuthClient({
 })
 
 export const {
-    signUp
+    signUp,
+    signOut,
+    signIn
 } = authClient

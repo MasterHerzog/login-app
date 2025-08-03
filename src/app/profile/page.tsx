@@ -1,3 +1,4 @@
+import { SignOutButton } from "@/components/sign-out-button";
 import { auth } from "@/lib/auth"
 import { headers } from "next/headers"
 
@@ -21,6 +22,8 @@ export default async function Page(){
             <div className="space-y-8">
                 <h1 className="text-3xl font-bold">Profile</h1>
             </div>
+
+            <SignOutButton />
 
             <pre className="text-sm overflow-clip">
                 {JSON.stringify(session, null, 2)}
