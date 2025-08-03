@@ -86,3 +86,10 @@ Create Sign In Page PT2
 Showcase onError
 Sign In User
 FINISH PART 1
+
+install lucide-react
+
+```bash
+npm install lucide-react
+npm install react-icons
+```
