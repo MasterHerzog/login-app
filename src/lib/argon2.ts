@@ -1,4 +1,4 @@
-import {hash, verify, type Options} from "@node-rs/argon2";
+import { hash, verify, type Options } from "@node-rs/argon2";
 
 const opts: Options = {
     memoryCost: 19456,
