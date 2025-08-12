@@ -1021,6 +1021,124 @@ import Link from "next/link";
 >4. Click on the Register link and verify you get redirected to the register form, verify the login link works the same way around.
 
 ## Disable better auth to sign you in automatically
+1. Go to `src/lib/auth.ts` and add the autoSignIn property.
+```typescript
+emailAndPassword: {
+    enabled: true,
+    minPasswordLength: 6,
+    autoSignIn: false,   // Add this line
+}
+```
+## Customize the sys_id of our database records
+1. Go to `src/lib/auth.ts` and add the advanced option below emailAndPassword.
+```typescript
+advanced: {
+	database: {
+	  generateId: false,
+	}
+}
+```
+2. go back to `prisma/schema.prisma` and add the `@default(uuid())` property on each ID.
+3. Push changes to postgres database
+```bash
+npx prisma db push
+```
+4. Delete all current users in your postrges database.
+5. Delete your browser cookie manually.
+
+> [!tip] **Verification**
+> 1. Start your dev server
+> ```bash
+> npm run dev
+> ```
+> 2. Register a new account, once you click on register verify you get redirected to the unauthorized form.
+> 3. Open you neon database and verify the sys_id of your record is uuid
+
+## Customize your password hash algorithm
+1. Install Argon2 algorithm for hashing.
+```bash
+npm install @node-rs/argon2
+```
+2. Update `next.config.ts` file to include argon2.
+```typescript
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  serverExternalPackages: ["@node-rs/argon2"],  //Add this line
+};
+
+export default nextConfig;
+```
+3. Go to `src/lib/` and create a new argon2 config file called `argon2.ts`.
+```typescript
+// argon2.ts
+import { hash, verify, type Options } from "@node-rs/argon2";
+const opts: Options = {
+//Recommended minimum parameters
+    memoryCost: 19456,
+    timeCost: 2,
+    outputLen: 32,
+    parallelism: 1,
+}
+/***************   We export next two functions   ***************/
+export async function hashPassword(password: string){
+    const result = await hash(password, opts);
+    return result
+}
+  
+//Function is defined this way because this is the way better auth wants us to define hashing funcions
+export async function verifyPassword(data: { password: string, hash: string}) {
+    const { password, hash } = data;
+    const result = await verify(hash, password, opts);
+    return result;
+}
+```
+
+> [!note] Lucia Auth recommended minimum parameters
+> For a simple password-based auth, the password can just be stored in the user table.
+>
+>```typescript
+>const passwordHash = await hash(password, {
+>	// recommended minimum parameters
+>	memoryCost: 19456,
+>	timeCost: 2,
+>	outputLen: 32,
+>	parallelism: 1
+>});
+>const userId = generateIdFromEntropySize(10); // 16 characters long
+>
+>await db.table("user").insert({
+>	id: userId,
+>	email,
+>	password_hash: passwordHash
+>});
+>```
+> [Article](https://v3.lucia-auth.com/upgrade-v3/)
+
+4. Go to `src/lib/auth.ts` and add the password property to emailAndPassword.
+```typescript
+import { hashPassword, verifyPassword } from "@/lib/argon2";
+
+/***************************************************************/
+emailAndPassword: {
+	enabled: true,
+	minPasswordLength: 6,
+	autoSignIn: false,
+	password: {
+	  hash: hashPassword, // your custom password hashing function
+	  verify: verifyPassword // your custom password verification function
+	}
+}
+```
+
+> [!tip] **Verification**
+> 1. Start your dev server.
+> ```bash
+> npm run dev
+> ```
+> 2. Register an account.
+> 3. Open your neon database
+> 4. Go to accounts table and verify the password property is hashed with your hashing algorithm. (argo2 passwords look something like this: $argon2id$v=19$m=19456,t=2,p=1$)
 
 ## References
 - [Next.js Documentation](https://nextjs.org/docs)

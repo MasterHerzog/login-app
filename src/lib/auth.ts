@@ -12,7 +12,7 @@ export const auth = betterAuth({
     enabled: true,
     minPasswordLength: 6,
     autoSignIn: false,
-    pasword: {
+    password: {
       hash: hashPassword, // your custom password hashing function
       verify: verifyPassword // your custom password verification function
     }
