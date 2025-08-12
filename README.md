@@ -1139,7 +1139,13 @@ emailAndPassword: {
 > 2. Register an account.
 > 3. Open your neon database
 > 4. Go to accounts table and verify the password property is hashed with your hashing algorithm. (argo2 passwords look something like this: $argon2id$v=19$m=19456,t=2,p=1$)
-
+## Sign Up User via Server Actions
+> [!warning]
+> We originally signed up & signed in using client, we are using the client instance of better auth and we did all the signing up/in on the client, **which is probably the recommended approach** but in this section we'll see how we can authenticate on the server side.
+>
+>We will refactor our sign up/in functions to be on server actions
+### Sing up functionality
+Minute 1:20:11
 ## References
 - [Next.js Documentation](https://nextjs.org/docs)
 - [Better Auth Documentation](https://www.better-auth.com/docs)
