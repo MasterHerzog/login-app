@@ -886,14 +886,141 @@ export const {
 > [!tip] **Verification**
 >- Go to `/auth/login` → The login form should render.
 >- Log in with an existing user → Redirects to `/profile` and displays session details.
-# Part II
+# Part II - Email & Password Authentication
+## Return button component
+1. go to `src/components/ui` and create `return-button.tsx` file.
+```typescript
+// src/components/ui/return-button.tsx
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { ArrowLeftIcon } from "lucide-react";
 
-Start on Minute 58:09
-Video Minute 1:17:40
-## Troubleshooting
-- **Database connection errors**: Verify `.env` values and network access to the PostgreSQL instance.
-- **Styles not applied**: Ensure Tailwind CSS is configured correctly in `tailwind.config.js`.
-- **Module not found errors**: Run `npm install` to ensure all dependencies are installed.
+interface ReturnButtonProps {
+    href: string;
+    label: string;
+}
+
+export const ReturnButton = ({ href, label }: ReturnButtonProps) => {
+    return (
+        <Button size="sm" asChild>
+            <Link href={href}>
+                <ArrowLeftIcon /> {label}
+            </Link>
+        </Button>
+    );
+};
+```
+
+2. we will add these in every page we have.
+```typescript
+// src/auth/register/page.tsx
+<ReturnButton href="/auth/login" label="Back to Login" /> //add above h1 Register
+
+// src/auth/login/page.tsx
+<ReturnButton href="/" label="Back to Home" /> // add above h1 Login
+
+//  src/auth/profile/page.tsx
+<ReturnButton href="/auth/login" label="Back to Login" /> // add above h1 Profile
+```
+
+## Make use of onRequest & onResponse properties
+1. Go to `src/components/ui/register-form.tsx` and add the loading state inside the Register form function:
+```typescript
+import { useState } from "react";
+/*********************************************************/
+export const RegisterForm = () => {
+  const [isPending, setIsPending] = useState(false);
+  const router = useRouter(); // Add router too for the onSuccess function
+/*********************************************************/
+```
+2. Update the onRequest, onResponse functions:
+```typescript
+// src/components/ui/register-form.tsx
+{
+	onRequest: () => {
+	  setIsPending(true);
+	},
+	onResponse: () => {
+	  setIsPending(false);
+	},
+	onError: (ctx) => {
+		toast.error(ctx.error.message);
+	},
+	onSuccess: () => {
+	  toast.success("Registration successful!");
+	  router.push("/profile");
+	}
+}
+/*********************************************************/
+// add isPending property to Button
+<Button
+      type="submit"
+      className="w-full bg-blue-600 text-white py-2 rounded-md"
+      disabled={isPending}
+>
+```
+3. Do the same for `login-form` & `sign-out-button`
+```typescript
+// login-form & sign-out-button
+import { useState } from "react";
+/*********************************************************/
+export const LoginForm = () => {
+  const [isPending, setIsPending] = useState(false)
+  const router = useRouter();
+/*********************************************************/
+onRequest: () => {
+  setIsPending(true);
+},
+onResponse: () => {
+  setIsPending(false);
+},
+onError: (ctx) => {
+  toast.error(ctx.error.message);
+}
+/*********************************************************/
+// onSuccess login-form
+onSuccess: () => {
+  toast.success("Login successful!");
+  router.push("/profile");
+}
+// onSuccess Sign-out-button
+onSuccess: () => {
+	toast.success("Signed out successfully");
+	router.push("/auth/login");
+}
+```
+4. Add convenience links to move around the page
+```typescript
+// src/app/auth/login/page.tsx & ~/register/page.tsx
+import Link from "next/link";
+/*********************************************************/
+// login/page.tsx add p below <loginForm /> component
+<p className="text-muted-foreground text-sm">
+	Don't have an account?{" "}
+	<Link href="/auth/register" className="text-blue-600 hover:underline">
+	  Register
+	</Link>
+</p>
+/*********************************************************/
+// register/page.tsx add p below <RegisterForm /> component
+<p className="text-muted-foreground text-sm">
+	Already have an account?{" "}
+	<Link href="/auth/login" className="text-blue-600 hover:underline">
+	  Login
+	</Link>
+</p>
+```
+
+> [!tip] **Verification**
+> 1. Run the server
+> ```typescript
+> npm run dev
+> ```
+>2.  Create and account, verify the register button is disabled when you click on it and you get redirected to your profile.
+>3. Click the sign out button and verify it has a loading state as well, you should be redirected to the login page.
+>4. Click on the Register link and verify you get redirected to the register form, verify the login link works the same way around.
+
+## Disable better auth to sign you in automatically
 
 ## References
 - [Next.js Documentation](https://nextjs.org/docs)
