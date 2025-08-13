@@ -1386,26 +1386,26 @@ export async function signInEmailAction(formData: FormData) {
 >
 >```
 >import { betterAuth } from "better-auth";
-import { nextCookies } from "better-auth/next-js";
-export const auth = betterAuth({
-    //...your config
-    plugins: [nextCookies()] // make sure this is the last plugin in the array
-})
+>import { nextCookies } from "better-auth/next-js";
+>export const auth = betterAuth({
+>    //...your config
+>    plugins: [nextCookies()] // make sure this is the last plugin in the array
+>})
 >```
 >
-Now, when you call functions that set cookies, they will be automatically set.
+>Now, when you call functions that set cookies, they will be automatically set.
 >
 >```
 >"use server";
-import { auth } from "@/lib/auth"
-const signIn = async () => {
-    await auth.api.signInEmail({
-        body: {
-            email: "user@email.com",
-            password: "password",
-        }
-    })
-}
+>import { auth } from "@/lib/auth"
+>const signIn = async () => {
+ >   await auth.api.signInEmail({
+>        body: {
+>            email: "user@email.com",
+>            password: "password",
+>        }
+>    })
+>}
 >```
 1. got to `src/lib/auth.ts` and import the nextCookies function.
 ```typescript
