@@ -1399,7 +1399,7 @@ export async function signInEmailAction(formData: FormData) {
 >"use server";
 >import { auth } from "@/lib/auth"
 >const signIn = async () => {
- >   await auth.api.signInEmail({
+>    await auth.api.signInEmail({
 >        body: {
 >            email: "user@email.com",
 >            password: "password",
