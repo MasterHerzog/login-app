@@ -5,47 +5,28 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { signUp } from "@/lib/auth-client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { signUpEmailAction } from "@/actions/sign-up-email.action";
 
 export const RegisterForm = () => {
-  const [isPending, setIsPending] = useState(false)
+  const [isPending, setIsPending] = useState(false);
   const router = useRouter();
 
     async function handleSubmit(evt: React.FormEvent<HTMLFormElement>) {
         evt.preventDefault();
+        setIsPending(true);
         const formData = new FormData(evt.target as HTMLFormElement);
+        const { error } = await signUpEmailAction(formData);
 
-        const name = String(formData.get("name"));
-        if (!name) return toast.error("Name is required");
-        const email = String(formData.get("email"));
-        if (!email) return toast.error("Email is required");
-        const password = String(formData.get("password"));
-        if (!password) return toast.error("Password is required");
-
-        await signUp.email(
-            {
-                name,
-                email,
-                password
-            },
-            {
-                onRequest: () => {
-                  setIsPending(true);
-                },
-                onResponse: () => {
-                  setIsPending(false);
-                },
-                onError: (ctx) => {
-                    toast.error(ctx.error.message);
-                },
-                onSuccess: () => {
-                  toast.success("Registration successful!");
-                  router.push("/profile");
-                }
-            }
-        )
+        if (error) {
+          toast.error(error);
+          setIsPending(false);
+        }else{
+          toast.success("Registration successful!");
+          router.push("/auth/login");
+        }
+        setIsPending(false);
     }
 
   return (

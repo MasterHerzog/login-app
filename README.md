@@ -1145,7 +1145,344 @@ emailAndPassword: {
 >
 >We will refactor our sign up/in functions to be on server actions
 ### Sing up functionality
-Minute 1:20:11
+1. Go to `src` and create a folder called `actions` inside create a file called `sign-up-email.action.ts` 
+```typescript
+// src/actions/sign-up-email.action.ts
+"use server"
+
+import { auth } from "@/lib/auth";
+
+export async function signUpEmailAction(formData: FormData) {
+    const name = String(formData.get("name"));
+    if (!name) return {error: "Name is required"}
+
+    const email = String(formData.get("email"));
+    if (!email) return {error: "Email is required"};
+
+    const password = String(formData.get("password"));
+    if (!password) return {error: "Password is required"};
+
+    try {
+        await auth.api.signUpEmail({
+            body: {
+                name,
+                email,
+                password
+            }
+        });
+        return {error: null}
+    } catch (err) {
+        if (err instanceof Error) {
+            return {error: "Oops! Something went wrong while registering"};
+        }
+        return {error: "Internal server error occurred"};
+    }
+}
+```
+2. Update `src/components/ui/register-form.tsx`
+```typescript
+// src/components/ui/register-form.tsx
+"use client";
+
+import React from "react";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { signUpEmailAction } from "@/actions/sign-up-email.action";
+
+export const RegisterForm = () => {
+  const [isPending, setIsPending] = useState(false);
+  const router = useRouter();
+
+    async function handleSubmit(evt: React.FormEvent<HTMLFormElement>) {
+        evt.preventDefault();
+        setIsPending(true);
+        const formData = new FormData(evt.target as HTMLFormElement);
+        const { error } = await signUpEmailAction(formData);
+  
+        if (error) {
+          toast.error(error);
+          setIsPending(false);
+        }else{
+          toast.success("Registration successful!");
+          router.push("/auth/login");
+        }
+        setIsPending(false);
+    }
+// Return remain the same
+```
+
+> [!tip] **Validation**
+> 1. Start your dev server
+> ```bash
+> npm run dev
+> ```
+> 2. Go to the register form.
+> 3. Create a new user, while creating the user try entering a short password (less than 6 characters), confirm an error message is shown.
+> 4. Create the user with allowed values and verify you get a confirmation toast message, and you get redirected to the login page.
+
+## Sign In User via Server Actions
+1. Go to `src/actions` create a file called `sign-in-email.action.ts` 
+```typescript
+// src/actions/sign-in-email.action.ts
+"use server"
+
+import { auth } from "@/lib/auth";
+
+export async function signInEmailAction(formData: FormData) {
+
+    const email = String(formData.get("email"));
+    if (!email) return {error: "Email is required"};
+
+    const password = String(formData.get("password"));
+    if (!password) return {error: "Password is required"};
+
+    try {
+        const res = await auth.api.signInEmail({
+            body: {
+                email,
+                password
+            },
+            asResponse: true
+        });
+
+        return {error: null}
+    } catch (err) {
+        if (err instanceof Error) {
+            return {error: "Oops! Something went wrong while logging in"};
+        }
+
+        return {error: "Internal server error occurred"};
+    }
+}
+```
+2. Update `src/components/ui/login-form.tsx`
+```typescript
+// src/components/ui/login-form.tsx
+"use client";
+
+import React from "react";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { signInEmailAction } from "@/actions/sign-in-email.action";
+
+export const LoginForm = () => {
+  const [isPending, setIsPending] = useState(false)
+  const router = useRouter();
+  
+  async function handleSubmit(evt: React.FormEvent<HTMLFormElement>) {
+      evt.preventDefault();
+      setIsPending(true);
+      const formData = new FormData(evt.target as HTMLFormElement);
+      const { error } = await signInEmailAction(formData);
+
+      if (error) {
+        toast.error(error);
+        setIsPending(false);
+      }else{
+        toast.success("Login successful!");
+        router.push("/profile");
+      }
+    }
+// Return remain the same
+```
+
+> [!tip] **Validation**
+> 1. Start your dev server
+> ```bash
+> npm run dev
+> ```
+> 2. Go to the login form.
+> 3. login with a wrong user, verify you get the error message you set in `sing-in-email` action as a toast.
+> 4. login with an existing user, verify you get the success message you set in `login-form` as a toast and you get redirected to profile page. (you will see and unauthorized page)
+## Set the cookie manually with email actions
+> [!note]
+> When you are working with server actions in nextjs you have to work with the cookies API to set the cookie, better auth has a plugin that does it for us, but before we use that we'll try to do it manually.
+
+1. Go to `src/actions/sign-in-email.action.ts` and setup the cookie manually.
+```typescript
+// src/actions/sign-in-email.action.ts
+"use server"
+
+import { auth } from "@/lib/auth";
+import { parseSetCookieHeader } from "better-auth/cookies";
+import { cookies, headers } from "next/headers";
+
+export async function signInEmailAction(formData: FormData) {
+    const email = String(formData.get("email"));
+    if (!email) return {error: "Email is required"};
+
+    const password = String(formData.get("password"));
+    if (!password) return {error: "Password is required"};
+
+    try {
+        const res = await auth.api.signInEmail({
+	        headers: await headers(), // We pass the headers
+            body: {
+                email,
+                password
+            },
+            asResponse: true
+        });
+
+        // setup cookie manually
+        const setCookieHeader = res.headers.get("set-cookie"); // we grab the cookie from the header
+        if (setCookieHeader){
+            const cookie = parseSetCookieHeader(setCookieHeader); // we are parsing it and getting all the attributes
+            const cookieStore = await cookies();
+            
+            // We format the cookie in the way that we need it
+            const [key, cookieAttributes] = [...cookie.entries()][0];
+            const value = cookieAttributes.value;
+            const maxAge = cookieAttributes["max-age"];
+            const path = cookieAttributes.path;
+            const httpOnly = cookieAttributes.httpOnly;
+            const sameSite = cookieAttributes.sameSite;
+
+            // We set the cookie manually
+            cookieStore.set(key, decodeURIComponent(value), {
+                maxAge,
+                path,
+                httpOnly,
+                sameSite
+            });
+        }
+        // ===
+
+        return {error: null}
+    } catch (err) {
+        if (err instanceof Error) {
+            return {error: "Oops! Something went wrong while logging in"};
+        }
+
+        return {error: "Internal server error occurred"};
+    }
+}
+```
+
+> [!tip] **Validation**
+> 1. Start your dev server
+> ```bash
+> npm run dev
+> ```
+> 2. Go to the login form.
+> 3. login with an existing user, verify you get the success message you set in `login-form` as a toast and you get redirected to profile page. (this time you should see your user info)
+
+## Set the cookie using Better auth function
+> [!note]  ### [Server Action Cookies](https://www.better-auth.com/docs/integrations/next#server-action-cookies)
+>
+>When you call a function that needs to set cookies, like `signInEmail` or `signUpEmail` in a server action, cookies won’t be set. This is because server actions need to use the `cookies` helper from Next.js to set cookies.
+>
+>To simplify this, you can use the `nextCookies` plugin, which will automatically set cookies for you whenever a `Set-Cookie` header is present in the response.
+>
+>auth.ts
+>
+>```
+>import { betterAuth } from "better-auth";
+import { nextCookies } from "better-auth/next-js";
+export const auth = betterAuth({
+    //...your config
+    plugins: [nextCookies()] // make sure this is the last plugin in the array
+})
+>```
+>
+Now, when you call functions that set cookies, they will be automatically set.
+>
+>```
+>"use server";
+import { auth } from "@/lib/auth"
+const signIn = async () => {
+    await auth.api.signInEmail({
+        body: {
+            email: "user@email.com",
+            password: "password",
+        }
+    })
+}
+>```
+1. got to `src/lib/auth.ts` and import the nextCookies function.
+```typescript
+import { betterAuth } from "better-auth";
+import { prismaAdapter } from "better-auth/adapters/prisma";
+import { nextCookies } from "better-auth/next-js" // import nextCookies package
+
+import { prisma } from "@/lib/prisma";
+import { hashPassword, verifyPassword } from "@/lib/argon2";
+
+export const auth = betterAuth({
+  database: prismaAdapter(prisma, {
+    provider: "postgresql",
+  }),
+  emailAndPassword: {
+    enabled: true,
+    minPasswordLength: 6,
+    autoSignIn: false,
+    password: {
+      hash: hashPassword, // your custom password hashing function
+      verify: verifyPassword // your custom password verification function
+    }
+  },
+  advanced: {
+    database: {
+      generateId: false,
+    }
+  },
+  plugins: [nextCookies()], // add the nextCookies plugin
+});
+```
+
+2. go to `sign-in-email.action.ts` and remove the manual cookie setup.
+```typescript
+"use server"
+
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+
+export async function signInEmailAction(formData: FormData) {
+
+    const email = String(formData.get("email"));
+    if (!email) return {error: "Email is required"};
+  
+    const password = String(formData.get("password"));
+    if (!password) return {error: "Password is required"};
+
+    try {
+        await auth.api.signInEmail({
+            headers: await headers(), // we pass the headers
+            body: {
+                email,
+                password
+            },
+        });
+
+        return {error: null}
+    } catch (err) {
+        if (err instanceof Error) {
+            return {error: "Oops! Something went wrong while logging in"};
+        }
+  
+        return {error: "Internal server error occurred"};
+    }
+}
+```
+
+> [!tip] **Validation**
+> 1. Start your dev server
+> ```bash
+> npm run dev
+> ```
+> 2. Go to the login form.
+> 3. login with an existing user, verify you get the success message you set in `login-form` as a toast and you get redirected to profile page. (you should see your user info)
+
+# Part III
+minute 1:36:42
 ## References
 - [Next.js Documentation](https://nextjs.org/docs)
 - [Better Auth Documentation](https://www.better-auth.com/docs)
