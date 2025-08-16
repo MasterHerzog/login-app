@@ -15,7 +15,8 @@ export const GetStartedButton = () => {
     );
   }
 
-  const href = session ? "/profile" : "/auth/login";
+  const href = session ? "/profile" : "/auth/login"; //if session active redirect to profile, else redirect to login screen
+
   //get Emoji from emojidb
 
   return (

@@ -1481,8 +1481,336 @@ export async function signInEmailAction(formData: FormData) {
 > 2. Go to the login form.
 > 3. login with an existing user, verify you get the success message you set in `login-form` as a toast and you get redirected to profile page. (you should see your user info)
 
-# Part III
-minute 1:36:42
+# Part III - Session, Middleware & Hooks
+## Get the session on the client with Hooks
+1. Go to `src/app/page.tsx` update to:
+```typescript
+import { GetStartedButton } from "@/components/ui/get-started-button";
+
+export default function Page() {
+  return (
+    <div className="flex items-center justify-center h-dvh">
+      <div className="flex justify-center gap-8 flex-col items-center">
+        <h1 className="text-6xl font-bold">Better Authy</h1>
+  
+        <GetStartedButton />
+      </div>
+    </div>
+  );
+}
+```
+2. Go to `src/lib/auth-client.ts` and export the session.
+```typescript
+import { createAuthClient } from "better-auth/react"
+import { auth } from "./auth"
+
+export const authClient = createAuthClient({
+    /** The base URL of the server (optional if you're using the same domain) */
+    baseURL: process.env.NEXT_PUBLIC_API_URL,
+})
+
+export const {
+    signUp,
+    signOut,
+    signIn,
+    useSession // Add this line to export the session
+} = authClient
+```
+2. Go to `src/components/ui` create a new file called `get-started-button.tsx`
+```typescript
+"use client";
+
+import { useSession } from "@/lib/auth-client";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+  
+export const GetStartedButton = () => {
+  const { data: session, isPending } = useSession();
+
+  if (isPending) {
+    return (
+      <Button size="lg" className="opacity-50">
+        Get Started
+      </Button>
+    );
+  }
+
+  const href = session ? "/profile" : "/auth/login"; //if session active redirect to profile, else redirect to login screen
+  
+  //get Emoji from emojidb
+
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <Button size="lg" asChild>
+        <Link href={href}>Get Started</Link>
+      </Button>
+      {session && <p>Welcome back, {session.user.name}! 👋</p>}
+    </div>
+  );
+};
+```
+### Change session session.expiresIn property
+1. Go to `src/lib/auth.ts` and add the session property.
+```typescript
+// add below emailAndPassword
+session: {
+    expiresIn: 30 * 24 * 60 * 60, // session expiration time in seconds
+},
+```
+
+> [!tip] **Validation**  
+> 1. Start your dev server  
+> ```bash
+> npm run dev
+> ```  
+> 2. Go to the home page (`/`).  
+> 3. Verify that the **Get Started** button is visible in the center of the screen.  
+> 4. If **no session** is active, clicking **Get Started** should redirect you to `/auth/login`.  
+> 5. Log in with an existing user.  
+> 6. After login, return to the home page (`/`).  
+> 7. Verify that:  
+>     - The **Get Started** button now redirects you to `/profile`.  
+>     - A welcome message is displayed below the button:  
+>       `Welcome back, <username>! 👋`  
+> 8. Confirm that the session expiration (`expiresIn`) is set to **30 days** in `src/lib/auth.ts`.  
+## Middleware
+>[!note] 
+>[**Middleware**](https://www.better-auth.com/docs/integrations/next#middleware)
+>In Next.js middleware, it's recommended to only check for the existence of a session cookie to handle redirection. To avoid blocking requests by making API or database calls.
+>[**Matcher**](https://nextjs.org/docs/app/api-reference/file-conventions/middleware#matcher)
+The `matcher` option allows you to target specific paths for the Middleware to run on.
+
+1. Go to `src/` and create a file called `middleware.ts`
+```typescript
+import { getSessionCookie } from "better-auth/cookies";
+import { NextRequest, NextResponse } from "next/server";
+
+// Define which routes should only be accessible by authenticated users
+const protectedRoutes = ["/profile"]
+
+export async function middleware(req: NextRequest) {
+    const { nextUrl } = req;
+    // Try to get the user's session cookie (null/undefined if not logged in)
+    const sessionCookie = getSessionCookie(req);
+  
+    // Default response: allow the request to continue
+    const res = NextResponse.next();
+
+    // Flags for current request state
+    const isLoggedIn = !!sessionCookie; // true if session cookie exists
+    const isOnProtectedRoute = protectedRoutes.includes(nextUrl.pathname); // true if current path is in protectedRoutes
+    const isOnAuthRoute = nextUrl.pathname.startsWith("/auth"); // true if user is on an auth page (login, signup, etc.)
+  
+    // 🚫 If user is trying to access a protected route but has no session -> redirect to login
+    if (isOnProtectedRoute && !isLoggedIn) {
+        return NextResponse.redirect(new URL("/auth/login", req.url));
+    }
+
+    // 🔄 If user is already logged in but tries to go to an auth route -> redirect to profile
+    if (isOnAuthRoute && isLoggedIn) {
+        return NextResponse.redirect(new URL("/profile", req.url));
+    }
+
+    // ✅ Otherwise, let the request pass through as normal
+    return res;
+}
+  
+// Middleware configuration: run for all routes except API, static files, and system assets
+export const config = {
+    matcher: [
+        "/((?!api|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)"
+    ]
+}
+```
+2. Go to `src/app/profile.tsx` and update the `if(!session)` result
+```typescript
+import { redirect } from "next/navigation";
+
+if (!session) {
+	return redirect("/auth/login");
+}
+```
+
+> [!tip] **Validation**  
+> 1. Start your dev server  
+> ```bash
+> npm run dev
+> ```  
+> 2. Go to `/profile` in your browser.  
+>     - If **not logged in**, you should be redirected to `/auth/login`.  
+> 3. Log in with an existing user.  
+> 4. After login, try accessing `/auth/login` or any `/auth/...` route.  
+>     - You should be redirected to `/profile`.  
+> 5. Go back to `/profile`.  
+>     - If logged in, the page should display your user profile (no redirect).  
+> 6. Confirm that static assets and API routes still work (e.g., `/favicon.ico` should load, `/api/...` routes should respond normally).  
+## Error Handling
+1. Go to `src/actions/sign-up-email.action.ts` update the catch.
+```typescript
+import { APIError } from "better-auth/api";
+
+catch (err) {
+	if (err instanceof APIError) {
+		const errCode = err.body ? (err.body.code as ErrorCode) : "UNKNOWN";
+		switch (errCode) {
+			case "USER_ALREADY_EXISTS":
+				return {error: "Oops! something went wrong. Please try again"};
+			default:
+				return {error: err.message};
+		}
+	}
+	return {error: "Internal server error occurred"};
+}
+```
+2. Go to `arc/lib/auth.ts` and add at the end of the file:
+```typescript
+export type ErrorCode = keyof typeof auth.$ERROR_CODES | "UNKNOWN";
+```
+3. Go to `src/actions/sign-in-email.action.ts` update the catch.
+```typescript
+import { APIError } from "better-auth/api";
+
+catch (err) {
+	if (err instanceof APIError) {
+		return {error: err.message};
+	}
+	return {error: "Internal server error occurred"};
+}
+```
+
+> [!tip] **Validation**  
+> 1. Start your dev server  
+> ```bash
+> npm run dev
+> ```  
+> 2. Go to your sign-up form.  
+> 3. Try registering with an email that already exists in the database.  
+>     - You should see the error message:  
+>       **"Oops! something went wrong. Please try again"**  
+> 4. Try registering with a new email.  
+>     - You should be successfully signed up (no error message).  
+> 5. Go to your sign-in form.  
+> 6. Enter invalid credentials (wrong email/password).  
+>     - You should see the error message returned from the API (`err.message`).  
+## Hooks
+> [!note]
+>[ **Hooks**](https://www.better-auth.com/docs/concepts/hooks)
+> Hooks in Better Auth let you "hook into" the lifecycle and execute custom logic. They provide a way to customize Better Auth's behavior without writing a full plugin.
+### Create a hook to validate our email domain
+1. Go to `src/lib/utils.ts` add the valid domains
+```typescript
+import { clsx, type ClassValue } from "clsx"
+import { twMerge } from "tailwind-merge"
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+
+// Valid domains
+export function getValidDomains() {
+  const domains = ["gmail.com", "yahoo.com", "outlook.com"];
+
+  if (process.env.NODE_ENV === "development") {
+    domains.push("email.com");
+  }
+  return domains;
+}
+```
+2. Go to `src/lib/auth.ts` and add the hooks between `emailAndPassword` and `session`.
+```typescript
+import { createAuthMiddleware, APIError } from "better-auth/api";
+import { getValidDomains } from "@/lib/utils";
+
+hooks: {
+    before: createAuthMiddleware( async (ctx) => {
+      if (ctx.path == "/sign-up/email"){
+        const email = String(ctx.body.email);
+        const domain = email.split("@")[1];
+		const VALID_DOMAINS = getValidDomains();
+        if (!VALID_DOMAINS.includes(domain)) {
+          throw new APIError("BAD_REQUEST", {
+            message: "Invalid email domain. Please use a valid email."
+          });
+        }
+      }
+    })
+  },
+```
+
+> [!tip] **Validation**  
+> 1. Start your dev server  
+> ```bash
+> npm run dev
+> ```  
+> 2. Go to the **sign-up form**.  
+> 3. Try registering with an invalid email domain (e.g., `user@invalid.com`).  
+>     - You should see the error message:  
+>       **"Invalid email domain. Please use a valid email."**  
+>     - The user should **not** be created.  
+> 4. Try registering with a valid email domain (`gmail.com`, `yahoo.com`, or `outlook.com`).  
+>     - The registration should succeed and the user should be created.  
+> 5. In **development mode**, also test with `user@email.com`.  
+>     - This should succeed (since `email.com` is added in dev).  
+
+### Create a hook to normalize name
+1. Go to `src/lib/utils.ts` add `normalizeName` function.
+```typescript
+export function normalizeName(name: string) {
+  return name
+
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[^a-zA-Z\s'-]/g, "")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+```
+2. Add the auth function to `auth.ts` inside hooks
+```typescript
+hooks: {
+    before: createAuthMiddleware( async (ctx) => {
+      if (ctx.path == "/sign-up/email"){
+        const email = String(ctx.body.email);
+        const domain = email.split("@")[1];
+        const VALID_DOMAINS = getValidDomains();
+        
+        if (!VALID_DOMAINS.includes(domain)) {
+          throw new APIError("BAD_REQUEST", {
+            message: "Invalid email domain. Please use a valid email."
+          });
+        }
+
+        const name = normalizeName(ctx.body.name);
+  
+        return {
+          context: {
+            ...ctx,
+            body: {
+              ...ctx.body,
+              name
+            },
+          },
+        };
+      }
+    })
+  },
+```
+
+> [!tip] **Validation**  
+> 1. Start your dev server  
+> ```bash
+> npm run dev
+> ```  
+> 2. Go to the **sign-up form**.  
+> 3. Register a user with extra spaces in the name (e.g., `   john   doe   `).  
+>     - The saved name should be normalized to: **"John Doe"**.  
+> 4. Register a user with invalid characters in the name (e.g., `m@ry!! sm1th`).  
+>     - The saved name should be normalized to: **"Mry Smth"** (special characters and numbers removed).  
+> 5. Register a user with mixed casing (e.g., `aLiCe o'coNnor`).  
+>     - The saved name should be normalized to: **"Alice O'Connor"**.  
+> 6. Confirm in the database or session that the normalized name is being stored correctly.  
+
+# Part IV - Roles
+
 ## References
 - [Next.js Documentation](https://nextjs.org/docs)
 - [Better Auth Documentation](https://www.better-auth.com/docs)
