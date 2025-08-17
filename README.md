@@ -2184,35 +2184,35 @@ export async function deleteUserAction({ userId }: { userId: string }) {
 
 > [!note]
 > [**Handling exceptions and errors in prisma**](https://www.prisma.io/docs/orm/prisma-client/debugging-and-troubleshooting/handling-exceptions-and-errors)
-In order to handle different types of errors you can use `instanceof` to check what the error is and handle it accordingly.
+>In order to handle different types of errors you can use `instanceof` to check what the error is and handle it accordingly.
 >
-The following example tries to create a user with an already existing email record. This will throw an error because the `email` field has the `@unique` attribute applied to it.
+>The following example tries to create a user with an already existing email record. This will throw an error because the `email` field has the `@unique` attribute applied to it.
 >
-schema.prisma
+>schema.prisma
 >```SQL
-model User {  
-  id    Int     @id @default(autoincrement())  
-  email String  @unique  
-  name  String?
-}
+>model User {  
+>  id    Int     @id @default(autoincrement())  
+>  email String  @unique  
+>  name  String?
+>}
 >```
-Use the `Prisma` namespace to access the error type. The [error code](https://www.prisma.io/docs/orm/reference/error-reference#error-codes) can then be checked and a message can be printed.
+>Use the `Prisma` namespace to access the error type. The [error code](https://www.prisma.io/docs/orm/reference/error-reference#error-codes) can then be checked and a message can be printed.
 >```typescript
-import { PrismaClient, Prisma } from '@prisma/client'
-const client = new PrismaClient()
-try {
-  await client.user.create({ data: { email: 'alreadyexisting@mail.com' } })
-} catch (e) {
-  if (e instanceof Prisma.PrismaClientKnownRequestError) {
-    // The .code property can be accessed in a type-safe manner
-    if (e.code === 'P2002') {
-      console.log(
-        'There is a unique constraint violation, a new user cannot be created with this email'
-      )
-    }
-  }
-  throw e
-}
+>import { PrismaClient, Prisma } from '@prisma/client'
+>const client = new PrismaClient()
+>try {
+>  await client.user.create({ data: { email: 'alreadyexisting@mail.com' } })
+>} catch (e) {
+>  if (e instanceof Prisma.PrismaClientKnownRequestError) {
+>    // The .code property can be accessed in a type-safe manner
+>    if (e.code === 'P2002') {
+>      console.log(
+>        'There is a unique constraint violation, a new user cannot be created with this email'
+>      )
+>    }
+>  }
+>  throw e
+>  }
 >```
 
 > [!tip] **Validation**  
