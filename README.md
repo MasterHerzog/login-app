@@ -1751,7 +1751,6 @@ hooks: {
 >     - The registration should succeed and the user should be created.  
 > 5. In **development mode**, also test with `user@email.com`.  
 >     - This should succeed (since `email.com` is added in dev).  
-
 ### Create a hook to normalize name
 1. Go to `src/lib/utils.ts` add `normalizeName` function.
 ```typescript
@@ -1808,9 +1807,428 @@ hooks: {
 > 5. Register a user with mixed casing (e.g., `aLiCe o'coNnor`).  
 >     - The saved name should be normalized to: **"Alice O'Connor"**.  
 > 6. Confirm in the database or session that the normalized name is being stored correctly.  
-
 # Part IV - Roles
+## Role Management - Manually
+1. Go to `prisma/schema.prisma`
+```SQL
+-- Add below datasource
+enum UserRole {
+  USER
+  ADMIN
+}
 
+-- Update User table
+model User {
+  id        String   @id @default(uuid())
+  createdAt DateTime
+  updatedAt DateTime
+  
+  name          String
+  email         String  @unique
+  emailVerified Boolean
+  image         String?
+  role UserRole @default(USER)
+
+  sessions Session[]
+  accounts Account[]
+  post     Post[]
+
+  @@map("users")
+}
+```
+2. Push the changes to our database
+```bash
+npx prisma db push
+```
+### Add role to our session object
+1. Go to `src/lib/auth.ts` and add additional field to our user, add this above session.
+```typescript
+user: {
+	additionalFields: {
+	  role: {
+		type: ["USER", "ADMIN"],
+		input: false,
+	  },
+	},
+},
+```
+### Add role to our auth client instance 
+1. Go to `src/lib/auth-client.ts` update to:
+```typescript
+import { createAuthClient } from "better-auth/react";
+import { inferAdditionalFields } from "better-auth/client/plugins";
+import type { auth } from "@/lib/auth";
+
+export const authClient = createAuthClient({
+  /** The base URL of the server (optional if you're using the same domain) */
+  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  plugins: [inferAdditionalFields<typeof auth>()],
+});
+
+export const { signUp, signOut, signIn, useSession } = authClient;
+```
+2. Go to `src/components/ui/get-started-button.tsx` update to display user role hint.
+```typescript
+// Update the return
+return (
+    <div className="flex flex-col items-center gap-4">
+      <Button size="lg" asChild>
+        <Link href={href}>Get Started</Link>
+      </Button>
+      {session && (
+        <p className="flex items-center gap-2">
+          <span
+            data-role={session.user.role}
+            className="size-4 rounded-full animate-pulse data-[role=USER]:bg-blue-600 data-[role=ADMIN]:bg-red-600"
+          />
+          Welcome back, {session.user.name}! 👋
+        </p>
+      )}
+    </div>
+  );
+```
+
+> [!tip] **Validation**  
+> 1. Start your dev server  
+> ```bash
+> npm run dev
+> ```  
+> 2. Register a new user via the sign-up form.  
+>     - By default, the user's `role` should be **USER**.  
+> 3. Go to the database and verify the `role` field for the user is set correctly.  
+> 4. Log in with the newly created user.  
+>     - On the home page, under the **Get Started** button, you should see a colored indicator:  
+>       - **Blue** pulse for `USER`  
+>       - **Red** pulse for `ADMIN`  
+> 5. Manually update a user in the database to have `role = ADMIN`.  
+> 6. Log in as that user.  
+>     - The role indicator should now appear **red**, confirming the `session.user.role` field is working correctly.  
+> 7. Confirm that `session.user.role` is accessible in your components via the `useSession()` hook.  
+## Create an admin panel
+1. Go to `src/app/` and create a new folder called `admin`, create a `dashboard` folder inside admin folder, and a `page.tsx` file inside dashboard
+```typescript
+import { ReturnButton } from "@/components/ui/return-button";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+  
+export default async function Page() {
+  // grab our session
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+  
+  if (!session) redirect("/auth/login");
+  
+  if (session.user.role !== "ADMIN") {
+    return (
+      <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+        <div className="space-y-8">
+          <ReturnButton href="/profile" label="Back to Profile" />
+  
+          <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+          <p className="p-2 rounded-md text-lg bg-red-600 text-white font-bold">
+            You do not have permission to view this page.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  
+  const users = await prisma.user.findMany({
+    orderBy: {
+      name: "asc",
+    },
+  });
+
+  return (
+    <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+      <div className="space-y-8">
+        <ReturnButton href="/profile" label="Back to Profile" />
+
+        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+  
+        <p className="p-2 rounded-md text-lg bg-green-600 text-white font-bold">
+          Welcome, {session.user.name}! You have admin access.
+        </p>
+      </div>
+      <div className="w-full overflow-x-auto">
+        <table className="table-auto min-w-full whitespace-nowrap">
+          <thead>
+            <tr>
+              <th className="px-4 py-2">ID</th>
+              <th className="px-4 py-2">Name</th>
+              <th className="px-4 py-2">Email</th>
+              <th className="px-4 py-2 text-center">Role</th>
+              <th className="px-4 py-2 text-center">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((user) => (
+              <tr key={user.id}>
+                <td className="border px-4 py-2">{user.id.slice(0, 8)}</td>
+                <td className="border px-4 py-2">{user.name}</td>
+                <td className="border px-4 py-2">{user.email}</td>
+                <td className="border px-4 py-2 text-center">{user.role}</td>
+                <td className="border px-4 py-2 text-center">DELETE</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+```
+1. Go to `src/middleware` and protect the admin page.
+```typescript
+const protectedRoutes = ["/profile", "/admin/dashboard"];
+```
+### Create a link to the admin dashboard page
+1. Go to `src/app/profile/page.tsx` add a link to the admin dashboard page above the sign out button.
+```typescript
+import { SignOutButton } from "@/components/sign-out-button";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+import { ReturnButton } from "@/components/ui/return-button";
+import { redirect } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Link } from "lucide-react";
+
+export default async function Page() {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+
+  if (!session) {
+    return redirect("/auth/login");
+  }
+
+  return (
+    <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+      <div className="space-y-8">
+        <ReturnButton href="/auth/login" label="Back to Login" />
+        <h1 className="text-3xl font-bold">Profile</h1>
+      </div>
+
+      <div className="flex items-center gap-2">
+        {session.user.role === "ADMIN"(
+          <Button size="sm" asChild>
+            <Link href="/admin/dashboard">Admin Dashboard</Link>
+          </Button>
+        )}
+        <SignOutButton />
+      </div>
+  
+      <pre className="text-sm overflow-clip">
+        {JSON.stringify(session, null, 2)}
+      </pre>
+    </div>
+  );
+}
+```
+### Add a delete user action
+1. Go to `src/components/` and create a new file called `delete-user-button.tsx`
+```typescript
+"use client";
+
+import { TrashIcon } from "lucide-react";
+import { Button } from "./ui/button";
+import { useState } from "react";
+import { toast } from "sonner";
+import { deleteUserAction } from "@/actions/delete-user.action";
+
+// Props definition for DeleteUserButton component
+interface DeleteUserButtonProps {
+  userId: string; // The ID of the user to be deleted
+}
+
+export const DeleteUserButton = ({ userId }: DeleteUserButtonProps) => {
+  const [isPending, setIsPending] = useState(false);
+  // Tracks whether the delete action is currently running (used to disable the button)
+  
+  // Handles the delete action when button is clicked
+  async function handleClick() {
+    setIsPending(true); // Disable button while request is in progress
+
+    const { error } = await deleteUserAction({ userId });
+    // Call the server action to delete the user
+
+    if (error) {
+      toast.error(error); // Show error toast if deletion failed
+    } else {
+      toast.success("User deleted Successfully!"); // Success toast on completion
+    }
+
+    setIsPending(false); // Re-enable button after request finishes
+  }
+
+  return (
+    <Button
+      onClick={handleClick} // Trigger delete on click
+      size="icon"
+      variant="destructive"
+      className="size-7 rounded-sm"
+      disabled={isPending}
+    >
+      <span className="sr-only">Delete User</span>
+      <TrashIcon />
+    </Button>
+  );
+};
+
+export const PlaceHolderDeleteUserButton = () => {
+  return (
+    <Button
+      size="icon"
+      variant="destructive"
+      className="size-7 rounded-sm"
+      disabled
+    >
+      <span className="sr-only">Delete User</span>
+      <TrashIcon />
+    </Button>
+  );
+};
+```
+2. Import button into `src/app/admin/dashboard/page.tsx`
+```typescript
+<tbody>
+	{users.map((user) => (
+	  <tr key={user.id}>
+		<td className="border px-4 py-2">{user.id.slice(0, 8)}</td>
+		<td className="border px-4 py-2">{user.name}</td>
+		<td className="border px-4 py-2">{user.email}</td>
+		<td className="border px-4 py-2 text-center">{user.role}</td>
+		<td className="border px-4 py-2 text-center">
+		  {user.role === "ADMIN" || user.id === session.user.id ? (
+				<PlaceHolderDeleteUserButton />
+			  ) : (
+				<DeleteUserButton userId={user.id} />
+			  )}
+		</td>
+	  </tr>
+	))}
+</tbody>
+```
+3. Go to `src/actions/` and create a file called `delete-user.action.ts`
+```typescript
+"use server";
+
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { revalidatePath } from "next/cache";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+
+export async function deleteUserAction({ userId }: { userId: string }) {
+  // 🔹 Get request headers (needed for auth and API calls)
+  const headersList = await headers();
+
+  // 🔹 Retrieve the current session from the authentication system
+  const session = await auth.api.getSession({
+    headers: headersList,
+  });
+
+  // 🔹 If no session exists → user is not logged in
+  if (!session) {
+    throw new Error("You must be logged in to delete a user.");
+  }
+
+  // 🔹 Only allow ADMINs to delete users
+  if (session.user.role !== "ADMIN") {
+    throw new Error("FORBIDDEN");
+  }
+
+  try {
+    // 🔹 Delete user from the database, but only if the user has role USER
+    await prisma.user.delete({
+      where: {
+        id: userId,
+        role: "USER", // prevents deleting other admins
+      },
+    });
+
+    // 🔹 If the admin deletes their own account → sign them out
+    if (session.user.id === userId) {
+      await auth.api.signOut({
+        headers: headersList,
+      });
+      redirect("/auth/sign-in"); // force redirect to sign-in page
+    }
+
+    // 🔹 Revalidate the admin dashboard so the deleted user no longer shows up
+    revalidatePath("/admin/dashboard");
+
+    // 🔹 Return success response (no error)
+    return { error: null };
+  } catch (err) {
+    // 🔹 Handle special redirect errors (must be re-thrown to work correctly)
+    if (isRedirectError(err)) {
+      throw err;
+    }
+
+    // 🔹 If it's a known error → return message
+    if (err instanceof Error) {
+      return { error: err.message };
+    }
+
+    // 🔹 Fallback for unexpected errors
+    return { error: "UNKNOWN_ERROR" };
+  }
+}
+```
+
+> [!note]
+> [**Handling exceptions and errors in prisma**](https://www.prisma.io/docs/orm/prisma-client/debugging-and-troubleshooting/handling-exceptions-and-errors)
+In order to handle different types of errors you can use `instanceof` to check what the error is and handle it accordingly.
+>
+The following example tries to create a user with an already existing email record. This will throw an error because the `email` field has the `@unique` attribute applied to it.
+>
+schema.prisma
+>```SQL
+model User {  
+  id    Int     @id @default(autoincrement())  
+  email String  @unique  
+  name  String?
+}
+>```
+Use the `Prisma` namespace to access the error type. The [error code](https://www.prisma.io/docs/orm/reference/error-reference#error-codes) can then be checked and a message can be printed.
+>```typescript
+import { PrismaClient, Prisma } from '@prisma/client'
+const client = new PrismaClient()
+try {
+  await client.user.create({ data: { email: 'alreadyexisting@mail.com' } })
+} catch (e) {
+  if (e instanceof Prisma.PrismaClientKnownRequestError) {
+    // The .code property can be accessed in a type-safe manner
+    if (e.code === 'P2002') {
+      console.log(
+        'There is a unique constraint violation, a new user cannot be created with this email'
+      )
+    }
+  }
+  throw e
+}
+>```
+
+> [!tip] **Validation**  
+> 1. Start your dev server  
+> ```bash
+> npm run dev
+> ```  
+> 2. Log in as an **ADMIN** and navigate to `/admin/dashboard`.  
+>     - A **trash icon button** should appear next to users with role `USER`.  
+>     - For other admins (including your own account), you should see the **placeholder button** instead.  
+> 3. As an **ADMIN**, delete a user with role `USER`.  
+>     - A **success toast** should appear.  
+>     - The user should be removed from the table immediately.  
+>     - Verify in your database that the record is deleted.
+## Database Hooks
+minute 2:42:25
 ## References
 - [Next.js Documentation](https://nextjs.org/docs)
 - [Better Auth Documentation](https://www.better-auth.com/docs)

@@ -14,6 +14,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum UserRole {
+  USER
+  ADMIN
+}
+
 model Post {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now())
@@ -34,9 +39,10 @@ model User {
   updatedAt DateTime
 
   name          String
-  email         String  @unique
+  email         String   @unique
   emailVerified Boolean
   image         String?
+  role          UserRole @default(USER)
 
   sessions Session[]
   accounts Account[]
