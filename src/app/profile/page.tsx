@@ -7,13 +7,24 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 
 export default async function Page() {
+  const headerList = await headers();
+
   const session = await auth.api.getSession({
-    headers: await headers(),
+    headers: headerList,
   });
 
   if (!session) {
     return redirect("/auth/login");
   }
+
+  const FULL_POST_ACCESS = await auth.api.userHasPermission({
+    headers: headerList,
+    body: {
+      permissions: {
+        posts: ["update", "delete"],
+      },
+    },
+  });
 
   return (
     <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
@@ -31,6 +42,13 @@ export default async function Page() {
         <SignOutButton />
       </div>
 
+      <div className="text-2xl font-bold">Permissions </div>
+      <div className="space-x-4">
+        <Button size="sm">MANAGE OWN POSTS</Button>
+        <Button size="sm" disabled={!FULL_POST_ACCESS.success}>
+          MANAGE ALL POSTS
+        </Button>
+      </div>
       <pre className="text-sm overflow-clip">
         {JSON.stringify(session, null, 2)}
       </pre>

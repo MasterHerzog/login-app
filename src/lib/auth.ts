@@ -2,10 +2,13 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js"; // import nextCookies
 import { createAuthMiddleware, APIError } from "better-auth/api";
+import { admin } from "better-auth/plugins";
 
 import { prisma } from "@/lib/prisma";
 import { hashPassword, verifyPassword } from "@/lib/argon2";
 import { getValidDomains, normalizeName } from "@/lib/utils";
+import { UserRole } from "@/generated/prisma";
+import { ac, roles } from "@/lib/permissions";
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
@@ -45,10 +48,25 @@ export const auth = betterAuth({
       }
     }),
   },
+  databaseHooks: {
+    user: {
+      create: {
+        before: async (user) => {
+          const ADMIN_EMAILS = process.env.ADMIN_EMAILS?.split(";") || [];
+
+          if (ADMIN_EMAILS.includes(user.email)) {
+            return { data: { ...user, role: UserRole.ADMIN } }; // set role to ADMIN if email is in the list
+          }
+
+          return { data: user };
+        },
+      },
+    },
+  },
   user: {
     additionalFields: {
       role: {
-        type: ["USER", "ADMIN"],
+        type: ["USER", "ADMIN"] as Array<UserRole>,
         input: false,
       },
     },
@@ -61,7 +79,15 @@ export const auth = betterAuth({
       generateId: false,
     },
   },
-  plugins: [nextCookies()], // add the nextCookies plugin
+  plugins: [
+    nextCookies(),
+    admin({
+      defaultRole: UserRole.USER, // default role for new users
+      adminRoles: [UserRole.ADMIN],
+      ac,
+      roles,
+    }),
+  ], // add the nextCookies plugin
 });
 
 export type ErrorCode = keyof typeof auth.$ERROR_CODES | "UNKNOWN";

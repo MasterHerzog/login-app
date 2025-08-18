@@ -43,10 +43,13 @@ model User {
   emailVerified Boolean
   image         String?
   role          UserRole @default(USER)
+  banned        Boolean?
+  banReason     String?
+  banExpires    DateTime?
 
   sessions Session[]
   accounts Account[]
-  post     Post[]
+  posts    Post[]
 
   @@map("users")
 }
@@ -60,6 +63,7 @@ model Session {
   token     String   @unique
   ipAddress String?
   userAgent String?
+  impersonatedBy String?
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
