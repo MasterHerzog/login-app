@@ -1843,10 +1843,12 @@ npx prisma db push
 ### Add role to our session object
 1. Go to `src/lib/auth.ts` and add additional field to our user, add this above session.
 ```typescript
+import { UserRole } from "@/generated/prisma";
+
 user: {
 	additionalFields: {
 	  role: {
-		type: ["USER", "ADMIN"],
+		type: ["USER", "ADMIN"] as Array<UserRole>,
 		input: false,
 	  },
 	},
@@ -2103,11 +2105,11 @@ export const PlaceHolderDeleteUserButton = () => {
 		<td className="border px-4 py-2">{user.email}</td>
 		<td className="border px-4 py-2 text-center">{user.role}</td>
 		<td className="border px-4 py-2 text-center">
-		  {user.role === "ADMIN" || user.id === session.user.id ? (
-				<PlaceHolderDeleteUserButton />
-			  ) : (
-				<DeleteUserButton userId={user.id} />
-			  )}
+		  {user.role === "USER" ? (
+			<DeleteUserButton userId={user.id} />
+		  ) : (
+			<PlaceHolderDeleteUserButton />
+		  )}
 		</td>
 	  </tr>
 	))}
@@ -2227,8 +2229,494 @@ export async function deleteUserAction({ userId }: { userId: string }) {
 >     - A **success toast** should appear.  
 >     - The user should be removed from the table immediately.  
 >     - Verify in your database that the record is deleted.
-## Database Hooks
-minute 2:42:25
+### Database Hooks
+#### Make specific users admin upon account creation
+1. Go to `src/lib/auth.ts` under hooks, add:
+```typescript
+// Check if you should be an admin and set your role to admin
+databaseHooks: {
+    user: {
+      create: {
+        before: async (user) => {
+          const ADMIN_EMAILS = process.env.ADMIN_EMAILS?.split(";") || [];
+  
+          if (ADMIN_EMAILS.includes(user.email)) {
+            return { data: { ...user, role: UserRole.ADMIN } }; // set role to ADMIN if email is in the list
+          }
+
+          return { data: user };
+        },
+      },
+    },
+  },
+```
+2. Create an environment variable for ADMIN_EMAIL, go to `.env`
+```typescript
+ADMIN_EMAILS="mauro@email.com;mauro.duque@email.com;testing@email.com;admin@email.com"
+```
+
+> [!tip] **Validation**  
+> 1. Start your dev server  
+> ```bash
+> npm run dev
+> ```  
+> 2. Register a new user with an email from `ADMIN_EMAILS`.  
+>     - Example: `mauro@email.com`  
+>     - Verify in your database that the user’s `role` is set to **ADMIN**.  
+> 3. Register a new user with an email **not** listed in `ADMIN_EMAILS`.  
+>     - Example: `random@email.com`  
+>     - Verify in your database that the user’s `role` remains **USER** (or your default role).  
+
+## Role Management - Better Auth Admin Plugin
+>[!note]
+>[** Better Auth Admin Plugin**](https://www.better-auth.com/docs/plugins/admin)
+>The Admin plugin provides a set of administrative functions for user management in your application. It allows administrators to perform various operations such as creating users, managing user roles, banning/unbanning users, impersonating users, and more.
+>
+> [**Schema**](https://www.better-auth.com/docs/plugins/admin#schema)
+>
+This plugin adds the following fields to the `user` table:
+>
+>| Field Name | Type    | Key | Description                                                             |
+| ---------- | ------- | --- | ----------------------------------------------------------------------- |
+| role       | string  | ?   | The user's role. Defaults to `user`. Admins will have the `admin` role. |
+| banned     | boolean | ?   | Indicates whether the user is banned.                                   |
+| banReason  | string  | ?   | The reason for the user's ban.                                          |
+| banExpires | date    | ?   | The date when the user's ban will expire.                               |
+>
+And adds one field in the `session` table:
+>
+>| Field Name     | Type   | Key | Description                                             |
+| -------------- | ------ | --- | ------------------------------------------------------- |
+| impersonatedBy | string | ?   | The ID of the admin that is impersonating this session. |
+
+1. Go to `src/lib/auth.ts`
+```typescript
+// import the plugin
+import { admin } from "better-auth/plugins"
+
+// add the plugin
+plugins: [
+    nextCookies(),
+    admin({
+      defaultRole: UserRole.USER, // default role for new users
+      adminRoles: [UserRole.ADMIN]
+    })
+  ],
+```
+2. Generate database to add the extra field for admin plugin
+```bash
+npx @better-auth/cli generate --output=roles.schema.prisma
+```
+3. Go to the file we generated `roles.schema.prisma` and copy the fields into our schema.
+4. Go to `prisma/schema.prisma` add the changes.
+```SQL
+--User table
+model User {
+  id        String   @id @default(uuid())
+  createdAt DateTime
+  updatedAt DateTime
+  
+  name          String
+  email         String   @unique
+  emailVerified Boolean
+  image         String?
+  role          UserRole @default(USER)
+  banned        Boolean? --New field
+  banReason     String? --New field
+  banExpires    DateTime? --New field
+
+  sessions Session[]
+  accounts Account[]
+  posts    Post[]
+  
+  @@map("users")
+}
+
+-- Session table
+
+model Session {
+  id        String   @id @default(uuid())
+  createdAt DateTime
+  updatedAt DateTime
+
+  expiresAt DateTime
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  impersonatedBy String? --New field
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+```
+5.  Once you added the changes you need to push the changes to the database
+```bash
+npx prisma db push
+```
+6. After you add the changes delete the prisma schema you created from where you copied the changes.
+
+> [!tip] **Validation**  
+> 1. Start your dev server  
+> ```bash
+> npm run dev
+> ```  
+> 2. Register a new user.  
+>     - In your database, verify that the new user has:  
+>       - `role` set to **USER** (default).  
+>       - `banned`, `banReason`, and `banExpires` set to **null/false** by default.  
+
+### Add permissions using better auth plugin
+1. Go to `src/lib/` and create a new file called `permissions.ts`.
+```typescript
+import { UserRole } from "@/generated/prisma";
+import { createAccessControl } from "better-auth/plugins/access";
+import { defaultStatements, adminAc } from "better-auth/plugins/admin/access";
+
+const statements = {
+  ...defaultStatements,
+  posts: ["read", "create", "update", "delete", "update:own", "delete:own"],
+} as const;
+  
+export const ac = createAccessControl(statements);
+
+export const roles = {
+  [UserRole.USER]: ac.newRole({
+    posts: ["read", "create", "update:own", "delete:own"],
+  }),
+  [UserRole.ADMIN]: ac.newRole({
+    ...adminAc.statements,
+    posts: ["read", "create", "update", "delete", "update:own", "delete:own"],
+  }),
+};
+```
+2. Import roles into `src/lib/auth.ts`
+```typescript
+// import roles
+import { ac, roles } from "@/lib/permissions"
+
+//update plugin
+plugins: [
+	nextCookies(),
+	admin({
+	  defaultRole: UserRole.USER, // default role for new users
+	  adminRoles: [UserRole.ADMIN],
+	  ac,
+	  roles,
+	}),
+],
+```
+3. Add roles into `src/lib/auth-client.ts`
+```typescript
+import { createAuthClient } from "better-auth/react";
+import { inferAdditionalFields, adminClient } from "better-auth/client/plugins";
+import type { auth } from "@/lib/auth";
+import { ac, roles } from "@/lib/permissions";
+
+export const authClient = createAuthClient({
+  /** The base URL of the server (optional if you're using the same domain) */
+  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  plugins: [inferAdditionalFields<typeof auth>(), adminClient({ ac, roles })],
+});
+  
+export const { signUp, signOut, signIn, useSession } = authClient;
+```
+### Stop prisma query and use better auth API to sort user table
+1. Go to `src/app/admin/dashboard/page.tsx` update to:
+```typescript
+import {
+  DeleteUserButton,
+  PlaceHolderDeleteUserButton,
+} from "@/components/delete-user-button";
+import { ReturnButton } from "@/components/ui/return-button";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+
+export default async function Page() {
+  const headerList = await headers();
+
+  // Get the current session from the request headers
+  const session = await auth.api.getSession({
+    headers: headerList,
+  });
+
+  // If no session exists, redirect user to the login page
+  if (!session) redirect("/auth/login");
+
+  // If the logged-in user is not an admin, show an error message and stop here
+  if (session.user.role !== "ADMIN") {
+    return (
+      <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+        <div className="space-y-8">
+          {/* Back button to return to profile */}
+          <ReturnButton href="/profile" label="Back to Profile" />
+
+          {/* Page title */}
+          <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+
+          {/* Error message shown when user has no admin permissions */}
+          <p className="p-2 rounded-md text-lg bg-red-600 text-white font-bold">
+            You do not have permission to view this page.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // If the user is an admin, fetch all users
+  const { users } = await auth.api.listUsers({
+    headers: headerList,
+    query: {
+      sortBy: "name",
+    },
+  });
+  
+  // Sort users so admins appear first
+  const sortedUsers = users.sort((a, b) => {
+    if (a.role === "ADMIN" && b.role !== "ADMIN") return -1;
+    if (a.role !== "ADMIN" && b.role === "ADMIN") return 1;
+    return 0;
+  });
+
+  
+  return (
+    <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+      <div className="space-y-8">
+        {/* Back button to return to profile */}
+        <ReturnButton href="/profile" label="Back to Profile" />
+  
+        {/* Page title */}
+        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+  
+        {/* Success message shown when user has admin access */}
+        <p className="p-2 rounded-md text-lg bg-green-600 text-white font-bold">
+          Welcome, {session.user.name}! You have admin access.
+        </p>
+      </div>
+  
+      {/* Users table */}
+      <div className="w-full overflow-x-auto">
+        <table className="table-auto min-w-full whitespace-nowrap">
+          <thead>
+            <tr>
+              <th className="px-4 py-2">ID</th>
+              <th className="px-4 py-2">Name</th>
+              <th className="px-4 py-2">Email</th>
+              <th className="px-4 py-2 text-center">Role</th>
+              <th className="px-4 py-2 text-center">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {/* Render each user in a table row */}
+            {sortedUsers.map((user) => (
+              <tr key={user.id}>
+                {/* Shortened ID (first 8 chars only) */}
+                <td className="border px-4 py-2">{user.id.slice(0, 8)}</td>
+
+                {/* User details */}
+                <td className="border px-4 py-2">{user.name}</td>
+                <td className="border px-4 py-2">{user.email}</td>
+                <td className="border px-4 py-2 text-center">{user.role}</td>
+  
+                {/* Show delete button only for USER role, otherwise show placeholder */}
+                <td className="border px-4 py-2 text-center">
+                  {user.role === "USER" ? (
+                    <DeleteUserButton userId={user.id} />
+                  ) : (
+                    <PlaceHolderDeleteUserButton />
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+```
+
+> [!tip] **Validation**  
+> 1. Start your dev server  
+> ```bash
+> npm run dev
+> ```  
+> 2. Log in as an **ADMIN** and navigate to `/admin/dashboard`.  
+> 3. Verify the users table:  
+>     - Users with role `ADMIN` should appear at the **top of the list**.  
+>     - Users with role `USER` should appear **below admins**.  
+> 4. Add a new user with role `ADMIN` and refresh the page.  
+>     - Confirm that the new admin appears at the **top**, maintaining correct sort order.  
+> 5. Add a new user with role `USER` and refresh the page.  
+>     - Confirm that the new user appears **below all admins**, maintaining correct sort order.  
+### Update delete user action prisma query to use admin api
+1. Go to `src/actions/delete-user.action.ts` 
+TBD
+### Make use of newly created roles
+1. Go to `src/app/profile/page.tdx`
+```typescript
+import { SignOutButton } from "@/components/sign-out-button";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+import { ReturnButton } from "@/components/ui/return-button";
+import { redirect } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+  
+export default async function Page() {
+  const headerList = await headers();
+
+  const session = await auth.api.getSession({
+    headers: headerList,
+  });
+
+  if (!session) {
+    return redirect("/auth/login");
+  }
+
+  const FULL_POST_ACCESS = await auth.api.userHasPermission({
+    headers: headerList,
+    body: {
+      permissions: {
+        posts: ["update", "delete"],
+      },
+    },
+  });
+
+  return (
+    <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+      <div className="space-y-8">
+        <ReturnButton href="/auth/login" label="Back to Login" />
+        <h1 className="text-3xl font-bold">Profile</h1>
+      </div>
+
+      <div className="flex items-center gap-2">
+        {session.user.role === "ADMIN" && (
+          <Button size="sm" asChild>
+            <Link href="/admin/dashboard">Admin Dashboard</Link>
+          </Button>
+        )}
+        <SignOutButton />
+      </div>
+
+      <div className="text-2xl font-bold">Permissions </div>
+      <div className="space-x-4">
+        <Button size="sm">MANAGE OWN POSTS</Button>
+        <Button size="sm" disabled={!FULL_POST_ACCESS.success}>
+          MANAGE ALL POSTS
+        </Button>
+      </div>
+      <pre className="text-sm overflow-clip">
+        {JSON.stringify(session, null, 2)}
+      </pre>
+    </div>
+  );
+}
+```
+### Create a dropdown menu for our roles
+1. Go to `src/components/user-role-select.tsx`
+```typescript
+"use client";
+
+import { UserRole } from "@/generated/prisma";
+import { admin } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { toast } from "sonner";
+  
+interface UserRoleSelectProps {
+  userId: string;
+  role: UserRole;
+}
+
+export const UserRoleSelect = ({ userId, role }: UserRoleSelectProps) => {
+  const [isPending, setIsPending] = useState(false);
+  const router = useRouter();
+  
+  async function handleChange(evt: React.ChangeEvent<HTMLSelectElement>) {
+    const newRole = evt.target.value as UserRole;
+  
+    const canChangeRole = await admin.hasPermission({
+      permissions: {
+        user: ["set-role"],
+      },
+    });
+
+    if (canChangeRole.error) {
+      return toast.error("You do not have permission to change user roles.");
+    }
+  
+    await admin.setRole({
+      userId,
+      role: newRole,
+      fetchOptions: {
+        onRequest: () => {
+          setIsPending(true);
+        },
+        onResponse: () => {
+          setIsPending(false);
+        },
+        onError: (ctx) => {
+          toast.error("Failed to update user role.");
+        },
+        onSuccess: () => {
+          toast.success("User role updated successfully.");
+          router.refresh();
+        },
+      },
+    });
+  }
+  
+  return (
+    <select
+      value={role}
+      onChange={handleChange}
+      disabled={role === UserRole.ADMIN || isPending}
+      className="px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <option value={UserRole.USER}>User</option>
+      <option value={UserRole.ADMIN}>Admin</option>
+    </select>
+  );
+};
+```
+2. Import select into admin dashboard `src/app/admin/dashboard/page.tsx`.
+```typescript
+<tbody>
+	{/* Render each user in a table row */}
+	{sortedUsers.map((user) => (
+	  <tr key={user.id}>
+		{/* Shortened ID (first 8 chars only) */}
+		<td className="border px-4 py-2">{user.id.slice(0, 8)}</td>
+		{/* User details */}
+		<td className="border px-4 py-2">{user.name}</td>
+		<td className="border px-4 py-2">{user.email}</td>
+		<td className="border px-4 py-2 text-center">
+		  <UserRoleSelect
+			userId={user.id}
+			role={user.role as UserRole}
+		  />
+		</td>
+		{/* Show delete button only for USER role, otherwise show placeholder */}
+		<td className="border px-4 py-2 text-center">
+		  {user.role === "USER" ? (
+			<DeleteUserButton userId={user.id} />
+		  ) : (
+			<PlaceHolderDeleteUserButton />
+		  )}
+		</td>
+	  </tr>
+	))}
+</tbody>
+```
+3. Go to `src/lib/auth-client.ts` and export admin.
+```typescript
+export const { signUp, signOut, signIn, useSession, admin } = authClient;
+```
+# Part V
+minute 2:15:15
 ## References
 - [Next.js Documentation](https://nextjs.org/docs)
 - [Better Auth Documentation](https://www.better-auth.com/docs)
