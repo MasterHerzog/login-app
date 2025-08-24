@@ -6,7 +6,6 @@ import { Button } from "./ui/button";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { sendVerificationEmail } from "@/lib/auth-client";
 import { resetPassword } from "@/lib/auth-client";
 
 interface ResetPasswordFormProps {

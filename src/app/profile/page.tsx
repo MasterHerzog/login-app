@@ -5,6 +5,8 @@ import { ReturnButton } from "@/components/ui/return-button";
 import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { UpdateUserForm } from "@/components/update-user-form";
+import { ChangePasswordForm } from "@/components/change-password-form";
 
 export default async function Page() {
   const headerList = await headers();
@@ -29,7 +31,7 @@ export default async function Page() {
   return (
     <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
       <div className="space-y-8">
-        <ReturnButton href="/auth/login" label="Back to Login" />
+        <ReturnButton href="/" label="Back to Home" />
         <h1 className="text-3xl font-bold">Profile</h1>
       </div>
 
@@ -49,9 +51,39 @@ export default async function Page() {
           MANAGE ALL POSTS
         </Button>
       </div>
+
+      {session.user.image ? (
+        <img
+          src={session.user.image}
+          alt="Profile Picture"
+          className="size-24 border border-primary rounded-md object-cover"
+        />
+      ) : (
+        <div className="size-24 border border-primary rounded-md bg-primary text-primary-foreground flex items-center justify-center">
+          <span className="uppercase text-lg font-bold">
+            {session.user.name.slice(0, 2)}
+          </span>
+        </div>
+      )}
+
       <pre className="text-sm overflow-clip">
         {JSON.stringify(session, null, 2)}
       </pre>
+
+      <div className="space-y-4 p-4 rounded-b-md border border-t-8 border-blue-600">
+        <h2 className="text-2xl font-bold">Update User</h2>
+
+        <UpdateUserForm
+          name={session.user.name}
+          image={session.user.image ?? ""}
+        />
+      </div>
+
+      <div className="space-y-4 p-4 rounded-b-md border border-t-8 border-red-600">
+        <h2 className="text-2xl font-bold">Update Password</h2>
+
+        <ChangePasswordForm />
+      </div>
     </div>
   );
 }

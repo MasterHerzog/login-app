@@ -3622,11 +3622,659 @@ export const {
   resetPassword
 } = authClient;
 ```
+
+> [!tip] **Verification**  
+> 1. Start your dev server.  
+> ```bash
+> npm run dev
+> ```  
+> 2. Go to the **Login** page and click **Forgot Password?**.  
+>     - You should be redirected to `/auth/forgot-password`.  
+> 3. Enter a valid email address for an existing user.  
+>     - A toast should show *"Reset email sent!"*.  
+>     - You should be redirected to `/auth/forgot-password/success`.  
+> 4. Check your email inbox.  
+>     - Confirm a **Reset Password email** is received with a link.  
+> 5. Click the reset link.  
+>     - You should be redirected to `/auth/reset-password?token=XYZ`.  
+> 6. Enter a **new password** and confirm it.  
+>     - If passwords do not match → error toast *"Passwords do not match"*.  
+>     - If empty password → error toast *"Please enter your password"*.  
+>     - If valid → toast *"Password reset successfully!"* and redirect to `/auth/login`.  
+> 7. Try logging in with the **old password** → should fail.  
+> 8. Try logging in with the **new password** → should succeed.  
+> 9. Negative tests:  
+>     - Open `/auth/reset-password` without a token → should redirect to `/auth/login`.  
+>     - Use an **expired or invalid token** → should show an error toast from the API.  
+
 # Part VII - update user, custom session, magic link
-minute 4:47:42
-## References
+## Update user
+1. Go to `src/app/profile/page.tsx` to add user image.
+```typescript
+import { SignOutButton } from "@/components/sign-out-button";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+import { ReturnButton } from "@/components/ui/return-button";
+import { redirect } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+
+export default async function Page() {
+  const headerList = await headers();
+  
+  const session = await auth.api.getSession({
+    headers: headerList,
+  });
+  
+  if (!session) {
+    return redirect("/auth/login");
+  }
+
+  const FULL_POST_ACCESS = await auth.api.userHasPermission({
+    headers: headerList,
+    body: {
+      permissions: {
+        posts: ["update", "delete"],
+      },
+    },
+  });
+
+  return (
+    <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+      <div className="space-y-8">
+        <ReturnButton href="/" label="Back to Home" />
+        <h1 className="text-3xl font-bold">Profile</h1>
+      </div>
+  
+      <div className="flex items-center gap-2">
+        {session.user.role === "ADMIN" && (
+          <Button size="sm" asChild>
+            <Link href="/admin/dashboard">Admin Dashboard</Link>
+          </Button>
+        )}
+        <SignOutButton />
+      </div>
+
+      <div className="text-2xl font-bold">Permissions </div>
+      <div className="space-x-4">
+        <Button size="sm">MANAGE OWN POSTS</Button>
+        <Button size="sm" disabled={!FULL_POST_ACCESS.success}>
+          MANAGE ALL POSTS
+        </Button>
+      </div>
+
+      {session.user.image ? (
+        <img
+          src={session.user.image}
+          alt="Profile Picture"
+          className="size-24 border border-primary rounded-md object-cover"
+        />
+      ) : (
+        <div className="size-24 border border-primary rounded-md bg-primary text-primary-foreground flex items-center justify-center">
+          <span className="uppercase text-lg font-bold">
+            {session.user.name.slice(0, 2)}
+          </span>
+        </div>
+      )}
+
+      <pre className="text-sm overflow-clip">
+        {JSON.stringify(session, null, 2)}
+      </pre>
+      <div className="space-y-4 p-4 rounded-b-md border border-t-8 border-blue-600">
+        <h2 className="text-2xl fontbold">Update User</h2>
+        
+        <UpdateUserForm
+          name={session.user.name}
+          image={session.user.image ?? ""}
+        />
+      </div>
+    </div>
+  );
+}
+```
+2. Build a component to update user, go to `src/components/` create a new file `update-user-form.tsx`.
+```typescript
+
+```
+3. Go to `src/lib/auth-client.ts` and export the function.
+```typescript
+export const {
+  signUp,
+  signOut,
+  signIn,
+  useSession,
+  admin,
+  sendVerificationEmail,
+  forgetPassword,
+  resetPassword,
+  updateUser,
+} = authClient;
+```
+
+> [!tip] **Verification**  
+> 1. Start your dev server.  
+> ```bash
+> npm run dev
+> ```  
+> 2. Log in with a valid account and go to `/profile`.  
+>     - The profile page should display your **name**, **permissions**, and **profile image** (or initials if no image is set).  
+> 3. In the **Update User** form:  
+>     - Change the **name** and click save → confirm the UI updates immediately and the new name is stored in the database.  
+>     - Upload/change a **profile image URL** → confirm the new image is displayed instead of initials.  
+> 4. Refresh the page.  
+>     - The updated user details (name + image) should persist.  
+> 5. Database check:  
+>     - In the `users` table, confirm the `name` and/or `image` fields are updated for the logged-in user.  
+> 6. Negative tests:  
+>     - Try submitting the form with an **empty name** → should show an error.  
+>     - Try uploading an **invalid image URL** → should fall back to initials without breaking the UI.  
+## Update password
+1. Go to `src/app/profile/page.tsx` and add below the update user section.
+```typescript
+<div className="space-y-4 p-4 rounded-b-md border border-t-8 border-red-600">
+	<h2 className="text-2xl font-bold">Update Password</h2>
+	
+	<ChangePasswordForm />
+</div>
+```
+2. Create a new component to change password, go to `src/components/` create a new file called `change-password-form.tsx`. (we are gonna do this on the server to showcase)
+```typescript
+"use client";
+
+import React from "react";
+import { Button } from "@/components/ui/button";
+import { Label } from "@radix-ui/react-label";
+import { Input } from "./ui/input";
+import { changePasswordAction } from "@/actions/change-password.action";
+import { toast } from "sonner";
+  
+export const ChangePasswordForm = () => {
+  const [isPending, setIsPending] = React.useState(false);
+  
+  async function handleSubmit(evt: React.FormEvent<HTMLFormElement>) {
+    evt.preventDefault();
+    setIsPending(true);
+  
+    const formData = new FormData(evt.target as HTMLFormElement);
+  
+    const { error } = await changePasswordAction(formData);
+
+    if (error) {
+      toast.error(error);
+    } else {
+      toast.success("Password changed successfully");
+      (evt.target as HTMLFormElement).reset();
+    }
+
+    setIsPending(false);
+  }
+
+  return (
+    <div>
+      <form className="max-w-sm w-full space-y-4" onSubmit={handleSubmit}>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="currentPassword">Current Password</Label>
+          <Input id="currentPassword" name="currentPassword" type="password" />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="newPassword">New Password</Label>
+          <Input id="newPassword" name="newPassword" type="password" />
+        </div>
+        <Button type="submit" disabled={isPending}>
+          Update
+        </Button>
+      </form>
+    </div>
+  );
+};
+```
+### Setup a server action to handle the change password
+1. Go to `src/actions/` create a new file called `change-password.action.ts`.
+```typescript
+"use server";
+
+import { auth } from "@/lib/auth";
+import { APIError } from "better-auth/api";
+import { headers } from "next/headers";
+  
+export async function changePasswordAction(formData: FormData) {
+  const currentPassword = String(formData.get("currentPassword"));
+  if (!currentPassword) return { error: "Please enter your current password" };
+  
+  const newPassword = String(formData.get("newPassword"));
+  if (!newPassword) return { error: "Please enter a new password" };
+
+  try {
+    await auth.api.changePassword({
+      headers: await headers(),
+      body: {
+        currentPassword,
+        newPassword,
+      },
+    });
+    return { error: null };
+  } catch (err) {
+    if (err instanceof APIError) {
+      return { error: err.message };
+    }
+  
+    return { error: "An unknown error occurred" };
+  }
+}
+```
+
+> [!tip] **Verification**  
+> 1. Start your dev server.  
+> ```bash
+> npm run dev
+> ```  
+> 2. Log in with an existing user account.  
+> 3. Go to `/profile` and scroll to the **Update Password** section.  
+> 4. Enter your **current password** and a **new password**.  
+>     - If the current password is wrong → you should see an **error toast**.  
+>     - If both fields are empty → you should see the appropriate **validation error**.  
+> 5. Enter the correct current password and a valid new one.  
+>     - You should see a **success toast** ("Password changed successfully").  
+>     - The form should reset automatically.  
+> 6. Log out and try logging in again with the **new password**.  
+>     - It should work.  
+>     - The old password should no longer be valid.  
+## Custom Sessions
+1. Go to `src/lib/auth.ts` update the whole file to add the custom session plugin.
+```typescript
+import { betterAuth, type BetterAuthOptions } from "better-auth";
+import { prismaAdapter } from "better-auth/adapters/prisma";
+import { nextCookies } from "better-auth/next-js"; // import nextCookies
+import { createAuthMiddleware, APIError } from "better-auth/api";
+import { admin, customSession } from "better-auth/plugins";
+
+import { prisma } from "@/lib/prisma";
+import { hashPassword, verifyPassword } from "@/lib/argon2";
+import { getValidDomains, normalizeName } from "@/lib/utils";
+import { UserRole } from "@/generated/prisma";
+import { ac, roles } from "@/lib/permissions";
+import { sendEmailAction } from "@/actions/send-email.action";
+
+const options = {
+  database: prismaAdapter(prisma, {
+    provider: "postgresql",
+  }),
+  socialProviders: {
+    google: {
+      clientId: String(process.env.GOOGLE_CLIENT_ID),
+      clientSecret: String(process.env.GOOGLE_CLIENT_SECRET),
+    },
+    github: {
+      clientId: String(process.env.GITHUB_CLIENT_ID),
+      clientSecret: String(process.env.GITHUB_CLIENT_SECRET),
+    },
+  },
+  emailAndPassword: {
+    enabled: true,
+    minPasswordLength: 6,
+    autoSignIn: false,
+    password: {
+      hash: hashPassword, // your custom password hashing function
+      verify: verifyPassword, // your custom password verification function
+    },
+    requireEmailVerification: true,
+    sendResetPassword: async ({ user, url }) => {
+      await sendEmailAction({
+        to: user.email,
+        subject: "Reset your password",
+        meta: {
+          description: `Please click the link below to reset your password.`,
+          link: url,
+        },
+      });
+    },
+  },
+  emailVerification: {
+    sendOnSignUp: true,
+    autoSignInAfterVerification: true,
+    sendVerificationEmail: async ({ user, url }) => {
+      const link = new URL(url);
+      link.searchParams.set("callBackUrl", "/auth/verify");
+  
+      await sendEmailAction({
+        to: user.email,
+        subject: "Verify your email",
+        meta: {
+          description: `Please verify your address to complete registration.`,
+          link: String(link),
+        },
+      });
+    },
+  },
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path == "/sign-up/email") {
+        const email = String(ctx.body.email);
+        const domain = email.split("@")[1];
+        const VALID_DOMAINS = getValidDomains();
+        if (!VALID_DOMAINS.includes(domain)) {
+          throw new APIError("BAD_REQUEST", {
+            message: "Invalid email domain. Please use a valid email.",
+          });
+        }
+        const name = normalizeName(ctx.body.name);
+
+        return {
+          context: {
+            ...ctx,
+            body: {
+              ...ctx.body,
+              name,
+            },
+          },
+        };
+      }
+    }),
+  },
+  databaseHooks: {
+    user: {
+      create: {
+        before: async (user) => {
+          const ADMIN_EMAILS = process.env.ADMIN_EMAILS?.split(";") || [];
+  
+          if (ADMIN_EMAILS.includes(user.email)) {
+            return { data: { ...user, role: UserRole.ADMIN } }; // set role to ADMIN if email is in the list
+          }
+
+          return { data: user };
+        },
+      },
+    },
+  },
+  user: {
+    additionalFields: {
+      role: {
+        type: ["USER", "ADMIN"] as Array<UserRole>,
+        input: false,
+      },
+    },
+  },
+  session: {
+    expiresIn: 30 * 24 * 60 * 60, // session expiration time in seconds
+  },
+  account: {
+    accountLinking: {
+      enabled: false,
+    },
+  },
+  advanced: {
+    database: {
+      generateId: false,
+    },
+  },
+  plugins: [
+    nextCookies(),
+    admin({
+      defaultRole: UserRole.USER, // default role for new users
+      adminRoles: [UserRole.ADMIN],
+      ac,
+      roles,
+    }),
+  ], // add the nextCookies and customSession plugins
+} satisfies BetterAuthOptions;
+  
+export const auth = betterAuth({
+  ...options,
+  plugins: [
+    ...(options.plugins ?? []),
+    customSession(async ({ user, session }) => {
+      return {
+        session: {
+          expiresAt: session.expiresAt,
+          tokenL: session.token,
+          userAgent: session.userAgent,
+        },
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          image: user.image,
+        },
+      };
+    }, options),
+  ],
+});
+
+export type ErrorCode = keyof typeof auth.$ERROR_CODES | "UNKNOWN";
+```
+2. Update `src/lib/auth-client.ts` to infer the custom session from auth.
+```typescript
+import {
+  inferAdditionalFields,
+  adminClient,
+  customSessionClient,
+} from "better-auth/client/plugins";
+
+export const authClient = createAuthClient({
+  /** The base URL of the server (optional if you're using the same domain) */
+  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  plugins: [
+    inferAdditionalFields<typeof auth>(),
+    adminClient({ ac, roles }),
+    customSessionClient<typeof auth>(),
+  ],
+});
+```
+
+> [!tip] **Verification**  
+> 1. Start your dev server.  
+> ```bash
+> npm run dev
+> ```  
+> 2. Log in with a valid account.  
+> 3. Navigate to the **Profile page**.  
+> 4. Confirm that both the **session values** (e.g., `expiresAt`, `token`, `userAgent`) and the **user values** (e.g., `id`, `email`, `name`, `role`, `image`) are displayed correctly.  
+## Use magic Link plugin from better auth
+> [!note]
+>[**Magic link**](https://www.better-auth.com/docs/plugins/magic-link)
+>Magic link or email link is a way to authenticate users without a password. When a user enters their email, a link is sent to their email. When the user clicks on the link, they are authenticated.
+1. Go to `src/lib/auth.ts` import magic link plugin.
+```typescript
+import { admin, customSession, magicLink } from "better-auth/plugins";
+
+//add below nextCookies() plugin
+magicLink({
+  sendMagicLink: async ({email, url}) => {
+	await sendEmailAction({
+	  to: email,
+	  subject: "Your Magic Link",
+	  meta: {
+		description: `Click the link below to log in:`,
+		link: url,
+	  },
+	});
+  }
+}),
+```
+3. import into `src/lib/auth-client.ts`
+```typescript
+import { createAuthClient } from "better-auth/react";
+import {
+  inferAdditionalFields,
+  adminClient,
+  customSessionClient,
+  magicLinkClient
+} from "better-auth/client/plugins";
+import type { auth } from "@/lib/auth";
+import { ac, roles } from "@/lib/permissions";
+
+export const authClient = createAuthClient({
+  /** The base URL of the server (optional if you're using the same domain) */
+  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  plugins: [
+    inferAdditionalFields<typeof auth>(),
+    adminClient({ ac, roles }),
+    customSessionClient<typeof auth>(),
+    magicLinkClient(),
+  ],
+});
+
+export const {
+  signUp,
+  signOut,
+  signIn,
+  useSession,
+  admin,
+  sendVerificationEmail,
+  forgetPassword,
+  resetPassword,
+  updateUser,
+} = authClient;
+```
+### Build a magic link component
+1. Go to `src/components/` create a new file called `magic-link-form.tsx`.
+```typescript
+"use client";
+
+import { StarIcon } from "lucide-react";
+import { useRef, useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { signIn } from "@/lib/auth-client";
+import { toast } from "sonner";
+
+export const MagicLinkForm = () => {
+  const [isPending, setIsPending] = useState(false);
+  const ref = useRef<HTMLDetailsElement>(null);
+
+  async function handleSubmit(evt: React.FormEvent<HTMLFormElement>) {
+    evt.preventDefault();
+
+    const formData = new FormData(evt.currentTarget as HTMLFormElement);
+    const email = String(formData.get("email"));
+    if (!email) return toast.error("Please enter your email");
+
+    await signIn.magicLink({
+      email,
+      name: email.split("@")[0],
+      callbackURL: "/profile",
+      fetchOptions: {
+        onRequest: () => {
+          setIsPending(true);
+        },
+        onResponse: () => {
+          setIsPending(false);
+        },
+        onError: (ctx) => {
+          toast.error(ctx.error.message);
+        },
+        onSuccess: () => {
+          toast.success("Check your email for the magic link!");
+          if (ref.current) ref.current.open = false;
+          (evt.target as HTMLFormElement).reset();
+        },
+      },
+    });
+  }
+
+  return (
+    <details
+      ref={ref}
+      className="max-w-sm rounded-md border border-purple-600 overflow-hidden"
+    >
+      <summary className="flex gap-2 items-center px-2 py-1 bg-purple-600 text-white hover:-bg-purple-600/80 transition">
+        Try Magic Link <StarIcon size={16} />
+      </summary>
+
+      <form onSubmit={handleSubmit} className="px-2 py-1">
+        <Label htmlFor="email" className="sr-only">
+          Email
+        </Label>
+
+        <div className="flex gap-2 items-center">
+          <Input
+            type="email"
+            id="email"
+            name="email"
+            placeholder="Enter your email"
+          />
+          <Button type="submit" disabled={isPending}>
+            Send
+          </Button>
+        </div>
+      </form>
+    </details>
+  );
+};
+```
+2. Import into the login page, go to `src/app/auth/login/page.tsx`.
+```typescript
+import { MagicLinkForm } from "@/components/magic-link-form";
+
+// Add below <div className="text-muted-foreground test-sm">
+<MagicLinkForm />
+```
+## Configure Normalize hook to run with magic link and update user
+1. Go to `src/lib/auth.ts` and update the hook.
+```typescript
+hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path == "/sign-up/email") {
+        const email = String(ctx.body.email);
+        const domain = email.split("@")[1];
+        const VALID_DOMAINS = getValidDomains();
+        
+        if (!VALID_DOMAINS.includes(domain)) {
+          throw new APIError("BAD_REQUEST", {
+            message: "Invalid email domain. Please use a valid email.",
+          });
+        }
+        const name = normalizeName(ctx.body.name);
+  
+        return {
+          context: { ...ctx, body: { ...ctx.body, name } },
+        };
+      }
+
+      if (ctx.path === "/sign-in/magic-link") {
+        const name = normalizeName(ctx.body.name);
+        
+        return {
+          context: { ...ctx, body: { ...ctx.body, name } },
+        };
+      }
+
+      if (ctx.path === "/update-user") {
+        const name = normalizeName(ctx.body.name);
+        
+        return {
+          context: { ...ctx, body: { ...ctx.body, name } },
+        };
+      }
+    }),
+  },
+```
+## Setup Cookie Cashing
+
+>[!note]
+>[**Cookie Cache**](https://www.better-auth.com/docs/concepts/session-management#cookie-cache)
+>
+>Calling your database every time `useSession` or `getSession` invoked isn’t ideal, especially if sessions don’t change frequently. Cookie caching handles this by storing session data in a short-lived, signed cookie—similar to how JWT access tokens are used with refresh tokens.
+>
+>When cookie caching is enabled, the server can check session validity from the cookie itself instead of hitting the database each time. The cookie is signed to prevent tampering, and a short `maxAge` ensures that the session data gets refreshed regularly. If a session is revoked or expires, the cookie will be invalidated automatically.
+1. Go to `src/lib/auth.ts` update the session property.
+```typescript
+session: {
+	expiresIn: 30 * 24 * 60 * 60, // session expiration time in seconds
+	cookieCache: {
+	  enabled: true,
+	  maxAge: 5 * 60,
+	},
+},
+```
+# References
 - [Next.js Documentation](https://nextjs.org/docs)
 - [Better Auth Documentation](https://www.better-auth.com/docs)
 - [Prisma ORM Documentation](https://www.prisma.io/docs)
 - [Neon Database](https://neon.tech)
 - [Nodemailer](https://nodemailer.com/about/)
+
+# Credits to
+[GiraffeReactor](https://www.youtube.com/@GiraffeReactor)

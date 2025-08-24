@@ -1,3 +1,4 @@
+import { MagicLinkForm } from "@/components/magic-link-form";
 import { LoginForm } from "@/components/ui/login-form";
 import { ReturnButton } from "@/components/ui/return-button";
 import { SignInOAuthButton } from "@/components/ui/sign-in-oauth-button";
@@ -12,6 +13,8 @@ export default function Page() {
       </div>
 
       <div className="text-muted-foreground test-sm">
+        <MagicLinkForm />
+
         <LoginForm />
         <p className="text-muted-foreground text-sm">
           Don't have an account?{" "}
