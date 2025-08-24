@@ -9,6 +9,8 @@ import { hashPassword, verifyPassword } from "@/lib/argon2";
 import { getValidDomains, normalizeName } from "@/lib/utils";
 import { UserRole } from "@/generated/prisma";
 import { ac, roles } from "@/lib/permissions";
+import { sendEmailAction } from "@/actions/send-email.action";
+import { url } from "inspector";
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
@@ -31,6 +33,34 @@ export const auth = betterAuth({
     password: {
       hash: hashPassword, // your custom password hashing function
       verify: verifyPassword, // your custom password verification function
+    },
+    requireEmailVerification: true,
+    sendResetPassword: async ({ user, url }) => {
+      await sendEmailAction({
+        to: user.email,
+        subject: "Reset your password",
+        meta: {
+          description: `Please click the link below to reset your password.`,
+          link: url,
+        },
+      });
+    },
+  },
+  emailVerification: {
+    sendOnSignUp: true,
+    autoSignInAfterVerification: true,
+    sendVerificationEmail: async ({ user, url }) => {
+      const link = new URL(url);
+      link.searchParams.set("callBackUrl", "/auth/verify");
+
+      await sendEmailAction({
+        to: user.email,
+        subject: "Verify your email",
+        meta: {
+          description: `Please verify your address to complete registration.`,
+          link: String(link),
+        },
+      });
     },
   },
   hooks: {
@@ -83,6 +113,11 @@ export const auth = betterAuth({
   },
   session: {
     expiresIn: 30 * 24 * 60 * 60, // session expiration time in seconds
+  },
+  account: {
+    accountLinking: {
+      enabled: false,
+    },
   },
   advanced: {
     database: {
