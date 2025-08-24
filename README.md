@@ -2940,7 +2940,690 @@ github: {
 >     - Temporarily revoke app permissions from your Google/GitHub account.  
 >     - Attempt to sign in again and confirm that an **error toast** is displayed.  
 ## Account Linking
-minute: 3:38:15
+>[!note]
+>1. Truncate neon database.
+>2. sign up with your gmail and github accounts, and then create a user with the same email.
+>3. Confirm 3 different account records were created for the same user.
+>
+>**This is called account linking and better auth does it for us automatically.**
+### Disable account linking
+1. Go to `src/lib/auth.ts` add account linking below session.
+```typescript
+account: {
+	accountLinking: {
+	  enabled: false,
+	},
+},
+```
+
+> [!tip] **Verification**  
+> 1. Start your dev server.  
+> ```bash
+> npm run dev
+> ```  
+> 2. Truncate your neon database.
+> 3. Create a new user manually with the same email as your Gmail account.
+> 4. Try to sing in with your Gmail account.
+> 5. you should be redirected to a 404 error page.
+### Create a custom error page
+1. Go to `src/app/auth/login` create a new folder called `error` inside error create a new file called `page.tsx`.
+```typescript
+import { ReturnButton } from "@/components/ui/return-button";
+
+interface PageProps {
+  searchParams: Promise<{ error: string }>;
+}
+
+export default async function Page({ searchParams }: PageProps) {
+  const sp = await searchParams;
+  return (
+    <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+      <div className="space-y-8">
+        <ReturnButton href="/auth/login" label="Back to Login" />
+        <h1 className="text-3xl font-bold">Login Error</h1>
+      </div>
+
+      <p className="text-destructive">
+        {sp.error == "account_not_linked"
+          ? "Your account is not linked. Please link your account."
+          : "An unknown error occurred."}
+      </p>
+    </div>
+  );
+}
+```
+# Part VI - Email Verification, Forgot Password, Reset Password
+## Install nodemailer
+```bash
+npm install nodemailer
+npm install @types/nodemailer --save-dev
+```
+## Setup nodemailer
+1. Go to `src/lib` create a new file called `nodemailer.ts`
+```typescript
+import nodemailer from "nodemailer";
+
+const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
+  auth: {
+    user: process.env.NODEMAILER_USER,
+    pass: process.env.NODEMAILER_APP_PASSWORD,
+  },
+});
+
+export default transporter;
+```
+2. Go to `.env`
+```typescript
+NODEMAILER_USER="your_email@gmail.com" //Your gmail
+
+NODEMAILER_APP_PASSWORD="your_app_password" //we will create this app password later
+```
+### Setup app passwords with google
+>[!note]
+>**Sign in with app passwords**
+>**mportant:** App passwords aren't recommended and are unnecessary in most cases. To help keep your account secure, use "Sign in with Google" to connect apps to your Google Account.
+>
+>An app password is a 16-digit passcode that gives a less secure app or device permission to access your Google Account. App passwords can only be used with accounts that have [2-Step Verification](https://support.google.com/accounts/answer/185839) turned on.
+>
+>**Create & use app passwords**
+>
+>**Important:** To create an app password, you need 2-Step Verification on your Google Account.
+>
+>If you use 2-Step-Verification and get a "password incorrect" error when you sign in, you can try to use an app password.
+>
+>[Create and manage your app passwords](https://myaccount.google.com/apppasswords). You may need to sign in to your Google Account.
+>
+>If you've set up 2-Step Verification but can't find the option to add an app password, it might be because:
+>
+>- Your Google Account has 2-Step Verification [set up only for security keys](https://support.google.com/accounts/answer/6103523).
+>- You're logged into a work, school, or another organization account.
+>- Your Google Account has [Advanced Protection](https://support.google.com/accounts/answer/7539956).
+>
+>**Tip:** Usually, you'll need to enter an app password once per app or device.
+1. Go to [Create and manage your app passwords](https://myaccount.google.com/apppasswords).
+2. Select the name of the app `login-app`.
+3. Copy your app password and paste it into your `.env` file.
+## Setup a server action to send emails
+1. Go to `src/actions` and create a new file called `send-email.action.ts`
+```typescript
+"use server";
+  
+import transporter from "@/lib/nodemailer";
+import { success } from "better-auth";
+import { BiParagraph } from "react-icons/bi";
+  
+const styles = {
+  container:
+    "max-width:500px;margin:20px auto;padding:20px;border:1px solid #eee;border-radius:5px;box-shadow:0 2px 5px rgba(0,0,0,0.1);",
+  heading: "font-size:20px;color:#333;",
+  paragraph: "font-size:16px;color:#666;line-height:1.5;",
+  link: "display:inline-block;margin-top:15px;padding:10px 15px;background-color:#007bff;color:#fff;border-radius:5px;text-decoration:none;",
+};
+
+export async function sendEmailAction({
+  to,
+  subject,
+  meta,
+}: {
+  to: string;
+  subject: string;
+  meta: {
+    description: string;
+    link: string;
+  };
+}) {
+  const mailOptions = {
+    from: process.env.NODEMAILER_USER,
+    to,
+    subject: `BetterAuthy - ${subject}`,
+    html: `
+          <div style="${styles.container}">
+            <h1 style="${styles.heading}">${subject}</h1>
+            <p style="${styles.paragraph}">${meta.description}</p>
+            <a href="${meta.link}" style="${styles.link}">Click here</a>
+          </div>
+        `,
+  };
+  
+  try {
+    await transporter.sendMail(mailOptions);
+    return { success: true };
+  } catch (err) {
+    console.log("Error sending email:", err);
+    return { success: false };
+  }
+}
+```
+2. Go to `src/lib/auth.ts` inside emailAndPassword add the requiredEmailVerification property.
+```typescript
+emailAndPassword: {
+    enabled: true,
+    minPasswordLength: 6,
+    autoSignIn: false,
+    password: {
+      hash: hashPassword, // your custom password hashing function
+      verify: verifyPassword, // your custom password verification function
+    },
+    requireEmailVerification: true,
+  },
+```
+## Setup Email
+1. Go to `src/lib/auth.ts` under emailAndPassword add emailVerification property.
+```typescript
+import { sendEmailAction } from "@/actions/send-email.action";
+
+emailVerification: {
+    sendOnSignUp: true,
+    expiresIn: 60 * 60,
+    autoSignInAfterVerification: true,
+    sendVerificationEmail: async ({ user, url }) => {
+      const link = new URL(url);
+      link.searchParams.set("callBackUrl", "/auth/verify"); //Redirect
+      
+      await sendEmailAction({
+        to: user.email,
+        subject: "Verify your email",
+        meta: {
+          description: `Please verify your address to complete registration.`,
+          link: String(url),
+        },
+      });
+    },
+  },
+```
+
+> [!tip] **Verification**  
+> 1. Start your dev server.  
+> ```bash
+> npm run dev
+> ```  
+> 2. Go to the sign-up form and register with a **new email** (it must be a real one).  
+> 3. Try logging in immediately.  
+>     - You should **not** be able to log in (blocked because email is not verified).  
+> 4. Check the Gmail inbox for the test account.  
+>     - Confirm that a **verification email** is received.  
+> 5. Click the **verification link** in the email.  
+> 6. After verification, try logging in again.  
+>     - You should now be able to **log in successfully**.  
+> 7. (Optional) Check your database `users` table:  
+>     - Before verification → `emailVerified` field should be `null`.  
+>     - After verification → `emailVerified` field should contain a **timestamp**.  
+## Setup error handling
+1. Go to `src/app/auth/` create a new folder called `verify` create a file inside called `page.tsx` 
+```typescript
+import { SendVerificationEmailForm } from "@/components/send-verification-email-form";
+import { ReturnButton } from "@/components/ui/return-button";
+import { redirect } from "next/navigation";
+
+interface PageProps {
+  searchParams: Promise<{ error: string }>;
+}
+  
+export default async function Page({ searchParams }: PageProps) {
+  const error = (await searchParams).error;
+
+  if (!error) redirect("/profile");
+
+  return (
+    <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+      <div className="space-y-8">
+        <ReturnButton href="/auth/login" label="Back to Login" />
+        <h1 className="text-3xl font-bold">Verify Email</h1>
+      </div>
+  
+      <p className="text-destructive">
+        {error == "invalid_token" || error == "token_expired"
+          ? "Your email verification link is invalid. Please request a new one."
+          : "An unknown error occurred."}
+      </p>
+      <SendVerificationEmailForm />
+    </div>
+  );
+}
+```
+## Create a form to resend the verification email
+1. Go to `src/components/` and create a new file called `send-verification-email-form.tsx`.
+```typescript
+"use client";
+
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Button } from "./ui/button";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { sendVerificationEmail } from "@/lib/auth-client";
+
+export const SendVerificationEmailForm = () => {
+  const [isPending, setIsPending] = useState(false);
+  const router = useRouter();
+
+  async function handleSubmit(evt: React.FormEvent<HTMLFormElement>) {
+    evt.preventDefault();
+    const formData = new FormData(evt.currentTarget);
+    const email = String(formData.get("email"));
+  
+    if (!email) return toast.error("Please enter your email");
+  
+    await sendVerificationEmail({
+      email,
+      callbackURL: "/auth/verify",
+      fetchOptions: {
+        onRequest: () => {
+          setIsPending(true);
+        },
+        onResponse: () => {
+          setIsPending(false);
+        },
+        onError: (ctx) => {
+          toast.error(ctx.error.message);
+        },
+        onSuccess: () => {
+          toast.success("Verification email sent!");
+          router.push("/auth/verify/success");
+        },
+      },
+    });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="max-w-sm w-full space-y-4">
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="email">Email</Label>
+        <Input id="email" name="email" type="email" />
+      </div>
+      <Button type="submit" disabled={isPending}>
+        Send Verification Email
+      </Button>
+    </form>
+  );
+};
+```
+2. Go to `src/lib/auth-client` and export sendVerificationEmail.
+```typescript
+export const {
+  signUp,
+  signOut,
+  signIn,
+  useSession,
+  admin,
+  sendVerificationEmail,
+} = authClient;
+```
+3. Create the success page, go to `src/app/auth/verify` create a new folder called `success/` create a new file inside called `page.tsx`
+```typescript
+import { ReturnButton } from "@/components/ui/return-button";
+
+export default function Page() {
+  return (
+    <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+      <div className="space-y-8">
+        <ReturnButton href="/auth/login" label="Back to Login" />
+        <h1 className="text-3xl font-bold">Success</h1>
+      </div>
+  
+      <p className="text-muted-foreground">
+        A verification email has been sent to your email address. Please check
+        your inbox and follow the instructions to verify your email.
+      </p>
+    </div>
+  );
+}
+```
+## Email verification recovery
+1. Go to `src/actions/sign-in-email.action.ts` update the catch
+```typescript
+import { auth, ErrorCode } from "@/lib/auth";
+import { redirect } from "next/navigation";
+
+catch (err) {
+    if (err instanceof APIError) {
+      const errCode = err.body ? (err.body.code as ErrorCode) : "UNKNOWN";
+
+      switch (errCode) {
+        case "EMAIL_NOT_VERIFIED":
+          redirect("/auth/verify?error=email_not_verified");
+        default:
+          return { error: err.message };
+      }
+    }
+    
+    return { error: "Internal server error occurred" };
+  }
+```
+2. Go to `src/app/auth/verify/page.tsx` add the error code.
+```typescript
+<p className="text-destructive">
+	{error == "invalid_token" || error == "token_expired"
+	  ? "Your email verification link is invalid. Please request a new one."
+	  : error == "email_not_verified"
+	  ? "Please verify your email, or request a new verification below"
+	  : "An unknown error occurred."}
+</p>
+```
+3. Create the success page for the register page, go to `src/app/auth/register` create a new folder called `success/` create a new file inside called `page.tsx`
+```typescript
+import { ReturnButton } from "@/components/ui/return-button";
+
+export default function Page() {
+  return (
+    <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+      <div className="space-y-8">
+        <ReturnButton href="/auth/login" label="Back to Login" />
+        <h1 className="text-3xl font-bold">Success</h1>
+      </div>
+
+      <p className="text-muted-foreground">
+        Success! You can now log in with your new account. Please check your email for the verification link.
+      </p>
+    </div>
+  );
+}
+```
+4. Go to `src/components/uiregister-form.tsx` to update the redirection
+```typescript
+if (error) {
+      toast.error(error);
+      setIsPending(false);
+    } else {
+      toast.success(
+        "Registration successful!, Please check your email for the verification link."
+      );
+      router.push("/auth/register/success");
+    }
+```
+
+> [!tip] **Verification**  
+> 1. Start your dev server.  
+> ```bash
+> npm run dev
+> ```  
+> 2. Sign up with a **new email** and check that you are redirected to  
+>    `/auth/register/success` with a success message telling you to verify your email.  
+> 3. Try logging in without verifying your email.  
+>     - You should be redirected to `/auth/verify?error=email_not_verified`.  
+>     - The page should show: **"Please verify your email, or request a new verification below"**.  
+> 4. Use the **"Send Verification Email"** form to request another link.  
+>     - Enter your email.  
+>     - Confirm a success toast appears: *"Verification email sent!"*.  
+>     - You should be redirected to `/auth/verify/success`.  
+> 5. Click the new verification link in your email.  
+>     - You should now be able to **log in successfully**.  
+> 6. Negative tests:  
+>     - Open the verification page with an **expired token** → should display  
+>       *"Your email verification link is invalid. Please request a new one."*  
+>     - Open with an **invalid token** → same message should appear.  
+>     - Open with **no error parameter** → should redirect to `/profile`.  
+## Forgot Password
+1. Go to `src/components/ui/login-form.tsx` update the password label.
+```typescript
+import Link from "next/link";
+
+<div className="space-y-2">
+	<div className="flex justify-between items-center gap-2">
+	  <Label htmlFor="password">Password</Label>
+	  <Link
+		href="/auth/forgot-password"
+		className="text-sm italic text-muted-foreground hover:text-foreground"
+>	
+		Forgot Password?
+	  </Link>
+	</div>
+	<Input type="password" id="password" name="password" />
+</div>
+```
+2. Create the forgot password page, go to `src/app/auth/` create a new folder called `forgot-password`, create a `page.tsx` file inside.
+```typescript
+import { ForgotPasswordForm } from "@/components/forgot-password-form";
+import { ReturnButton } from "@/components/ui/return-button";
+
+export default function Page() {
+  return (
+    <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+      <div className="space-y-8">
+        <ReturnButton href="/auth/login" label="Back to Login" />
+        <h1 className="text-3xl font-bold">Success</h1>
+      </div>
+  
+      <p className="text-muted-foreground">
+        Please enter your email address to receive a password reset link.
+      </p>
+      
+      <ForgotPasswordForm />
+    </div>
+  );
+}
+```
+3. Go to `src/lib/auth.ts` and setup the forgot password functionality inside emailAndPassword.
+```typescript
+emailAndPassword: {
+	enabled: true,
+	minPasswordLength: 6,
+	autoSignIn: false,
+	password: {
+	  hash: hashPassword, // your custom password hashing function
+	  verify: verifyPassword, // your custom password verification function
+	},
+	requireEmailVerification: true,
+	sendResetPassword: async ({ user, url }) => {
+	  await sendEmailAction({
+		to: user.email,
+		subject: "Reset your password",
+		meta: {
+		  description: `Please click the link below to reset your password.`,
+		  link: url,
+		},
+	  });
+	},
+},
+```
+3. Create a separate component for the forgot password form, go to `src/component/` create a new file called `forgot-password-form.tsx`.
+```typescript
+"use client";
+
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Button } from "./ui/button";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { forgetPassword, sendVerificationEmail } from "@/lib/auth-client";
+  
+export const ForgotPasswordForm = () => {
+  const [isPending, setIsPending] = useState(false);
+  const router = useRouter();
+  
+  async function handleSubmit(evt: React.FormEvent<HTMLFormElement>) {
+    evt.preventDefault();
+    const formData = new FormData(evt.currentTarget);
+    const email = String(formData.get("email"));
+
+    if (!email) return toast.error("Please enter your email");
+  
+    await forgetPassword({
+      email,
+      redirectTo: "/auth/reset-password",
+      fetchOptions: {
+        onRequest: () => {
+          setIsPending(true);
+        },
+        onResponse: () => {
+          setIsPending(false);
+        },
+        onError: (ctx) => {
+          toast.error(ctx.error.message);
+        },
+        onSuccess: () => {
+          toast.success("Reset email sent!");
+          router.push("/auth/forgot-password/success");
+        },
+      },
+    });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="max-w-sm w-full space-y-4">
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="email">Email</Label>
+        <Input id="email" name="email" type="email" />
+      </div>
+      <Button type="submit" disabled={isPending}>
+        Send Reset Link
+      </Button>
+    </form>
+  );
+};
+```
+4. Go to `src/lib/auth-client` and export the forgotPasswordForm Function
+```typescript
+export const {
+  signUp,
+  signOut,
+  signIn,
+  useSession,
+  admin,
+  sendVerificationEmail,
+  forgetPassword,
+} = authClient;
+```
+5. Create a success page for forgot-password, go to `src/app/forgot-password/` create a new folder called `success` create a file inside called `page.tsx`.
+```typescript
+import { ReturnButton } from "@/components/ui/return-button";
+
+export default function Page() {
+  return (
+    <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+      <div className="space-y-8">
+        <ReturnButton href="/auth/login" label="Back to Login" />
+        <h1 className="text-3xl font-bold">Success</h1>
+      </div>
+
+      <p className="text-muted-foreground">
+        Success! You have sent a password reset link to your email address.
+        Please check your inbox and follow the instructions to reset your
+        password.
+      </p>
+    </div>
+  );
+}
+```
+### Setup the reset password page
+1. Go to `src/app/auth/` create a new folder called `reset-password`, create a `page.tsx` file inside.
+```typescript
+import { ResetPasswordForm } from "@/components/reset-password-form";
+import { ReturnButton } from "@/components/ui/return-button";
+import { redirect } from "next/navigation";
+
+interface PageProps {
+    searchParams: Promise<{ token: string }>;
+}
+
+export default async function Page({ searchParams }: PageProps) {
+    const token = (await searchParams).token;
+  
+    if(!token) redirect("/auth/login");
+  return (
+    <div className="px-8 py-16 container mx-auto max-w-screen-lg space-y-8">
+      <div className="space-y-8">
+        <ReturnButton href="/auth/login" label="Back to Login" />
+        <h1 className="text-3xl font-bold">Reset Password</h1>
+      </div>
+  
+      <p className="text-muted-foreground">
+        Please enter your new password below.
+      </p>
+      
+      <ResetPasswordForm token={token} />
+    </div>
+  );
+}
+```
+2. Create a reset password from component, go to `src/components` and create a new file called `reset-password-form.tsx`
+```typescript
+"use client";
+
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Button } from "./ui/button";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { resetPassword } from "@/lib/auth-client";
+
+interface ResetPasswordFormProps {
+  token: string;
+}
+
+export const ResetPasswordForm = ({ token }: ResetPasswordFormProps) => {
+  const [isPending, setIsPending] = useState(false);
+  const router = useRouter();
+  
+  async function handleSubmit(evt: React.FormEvent<HTMLFormElement>) {
+    evt.preventDefault();
+    const formData = new FormData(evt.currentTarget);
+    const password = String(formData.get("password"));
+    if (!password) return toast.error("Please enter your password");
+  
+    const confirmPassword = String(formData.get("confirmPassword"));
+    if (password !== confirmPassword)
+      return toast.error("Passwords do not match");
+  
+    await resetPassword({
+      newPassword: password,
+      token,
+      fetchOptions: {
+        onRequest: () => {
+          setIsPending(true);
+        },
+        onResponse: () => {
+          setIsPending(false);
+        },
+        onError: (ctx) => {
+          toast.error(ctx.error.message);
+        },
+        onSuccess: () => {
+          toast.success("Password reset successfully!");
+          router.push("/auth/login");
+        },
+      },
+    });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="max-w-sm w-full space-y-4">
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="password">New Password</Label>
+        <Input id="password" name="password" type="password" />
+      </div>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="confirmPassword">Confirm Password</Label>
+        <Input id="confirmPassword" name="confirmPassword" type="password" />
+      </div>
+      <Button type="submit" disabled={isPending}>
+        Reset Password
+      </Button>
+    </form>
+  );
+};
+```
+3. Go to `src/lib/auth-client.ts` and export he function.
+```typescript
+export const {
+  signUp,
+  signOut,
+  signIn,
+  useSession,
+  admin,
+  sendVerificationEmail,
+  forgetPassword,
+  resetPassword
+} = authClient;
+```
+# Part VII - update user, custom session, magic link
+minute 4:47:42
 ## References
 - [Next.js Documentation](https://nextjs.org/docs)
 - [Better Auth Documentation](https://www.better-auth.com/docs)
