@@ -14,10 +14,10 @@ This guide walks through setting up a secure login system in Next.js using Bette
   - REST API concepts
 
 ## Technologies used
-Neon Database - to store our database
-Prisma ORM
-Nodemailer
-Better Auth
+- Neon Database - to store our database
+- Prisma ORM
+- Nodemailer
+- Better Auth
 
 # Part I
 ## Initial Setup
